@@ -134,6 +134,44 @@ def test_episode_processor_reuses_existing_artifacts_without_openai_or_media_cal
     assert second_paths.mode3_path.stat().st_mtime_ns == mtimes["mode3"]
 
 
+def test_episode_processor_enriches_existing_english_cues_missing_pinyin(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    processor = EpisodeProcessor(settings=settings, openai=FailingOpenAI(), media=FakeMediaRunner())
+    paths = processor.process_paths(input_path)
+    paths.ensure_directories()
+    paths.audio_path.write_text("audio")
+    paths.raw_transcript_path.write_text(json.dumps({"segments": []}), encoding="utf-8")
+    paths.mode1_path.write_text("mode1")
+    paths.mode2_path.write_text("mode2")
+    paths.mode3_path.write_text("mode3")
+    paths.normalized_cues_path.write_text(
+        json.dumps(
+            [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 1.0,
+                    "speaker": "A",
+                    "chinese": "你好",
+                    "pinyin": None,
+                    "english": "Hello",
+                }
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    processor.process(input_path)
+
+    cues = json.loads(paths.normalized_cues_path.read_text(encoding="utf-8"))
+    assert cues[0]["pinyin"] == "nǐ hǎo"
+    assert "nǐ hǎo" in paths.pinyin_subtitle_path.read_text(encoding="utf-8")
+
+
 def test_episode_processor_rejects_missing_translation_index_and_records_failure(tmp_path):
     input_path = make_input(tmp_path)
     settings = make_settings(tmp_path)
@@ -165,6 +203,29 @@ def test_episode_processor_translation_failure_preserves_pinyin_artifacts_and_re
     assert [cue["english"] for cue in cues] == [None, None]
     assert manifest_step(settings, paths.slug, "build_cues")["status"] == "failed"
     assert manifest_step(settings, paths.slug, "build_cues")["error"] == "translation unavailable"
+
+
+def test_episode_processor_resumes_after_translation_failure_without_rerunning_early_stages(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    first_media = FakeMediaRunner()
+
+    with pytest.raises(RuntimeError, match="translation unavailable"):
+        EpisodeProcessor(settings=settings, openai=TranslationErrorOpenAI(), media=first_media).process(input_path)
+
+    openai = FakeOpenAI()
+    second_media = FakeMediaRunner()
+    paths = EpisodeProcessor(settings=settings, openai=openai, media=second_media).process(input_path)
+    cues = json.loads(paths.normalized_cues_path.read_text(encoding="utf-8"))
+
+    assert openai.transcribe_calls == 0
+    assert openai.translate_calls == 1
+    assert "render_mode1" not in [call[0] for call in second_media.calls]
+    assert "extract_audio" not in [call[0] for call in second_media.calls]
+    assert all(cue["pinyin"] for cue in cues)
+    assert all(cue["english"] for cue in cues)
+    assert paths.mode2_path.read_text() == "rendered"
+    assert paths.mode3_path.read_text() == "rendered"
 
 
 def test_episode_processor_render_failure_records_manifest_failure(tmp_path):

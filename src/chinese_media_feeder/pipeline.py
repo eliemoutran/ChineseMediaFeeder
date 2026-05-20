@@ -151,9 +151,17 @@ class EpisodeProcessor:
 
     def _build_cues(self, paths: EpisodePaths, force: bool) -> list[Cue]:
         try:
+            pinyin_changed = False
             if not force and paths.normalized_cues_path.exists():
                 cues = _read_cues(paths.normalized_cues_path)
-                if _has_complete_translations(cues):
+                cues, pinyin_changed = _enrich_missing_pinyin(cues)
+                if pinyin_changed:
+                    _write_cues(paths.normalized_cues_path, cues)
+                if _has_complete_cues(cues):
+                    if pinyin_changed or not paths.pinyin_subtitle_path.exists():
+                        write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                    if pinyin_changed and paths.alternating_subtitle_path.exists():
+                        write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
                     return cues
             else:
                 raw_transcript = json.loads(paths.raw_transcript_path.read_text(encoding="utf-8"))
@@ -161,7 +169,7 @@ class EpisodeProcessor:
                 cues = [replace(cue, pinyin=chinese_to_pinyin(cue.chinese)) for cue in cues]
                 _write_cues(paths.normalized_cues_path, cues)
 
-            if force or not paths.pinyin_subtitle_path.exists():
+            if force or pinyin_changed or not paths.pinyin_subtitle_path.exists():
                 write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
 
             translations = self.openai.translate_cues(cues)
@@ -222,8 +230,24 @@ def _write_cues(path: Path, cues: list[Cue]) -> None:
     )
 
 
-def _has_complete_translations(cues: list[Cue]) -> bool:
-    return all(cue.english is not None for cue in cues)
+def _has_complete_cues(cues: list[Cue]) -> bool:
+    return all(_has_text(cue.pinyin) and _has_text(cue.english) for cue in cues)
+
+
+def _enrich_missing_pinyin(cues: list[Cue]) -> tuple[list[Cue], bool]:
+    changed = False
+    enriched = []
+    for cue in cues:
+        if _has_text(cue.pinyin):
+            enriched.append(cue)
+            continue
+        enriched.append(replace(cue, pinyin=chinese_to_pinyin(cue.chinese)))
+        changed = True
+    return enriched, changed
+
+
+def _has_text(value: str | None) -> bool:
+    return bool(value and value.strip())
 
 
 def _validate_translation_indexes(cues: list[Cue], translations: dict[int, str]) -> None:
