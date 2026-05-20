@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +11,10 @@ SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".m4v", ".webm"}
 def slugify_episode(path: Path) -> str:
     ascii_stem = path.stem.encode("ascii", errors="ignore").decode("ascii")
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", ascii_stem).strip("-").lower()
-    return slug or "episode"
+    if slug:
+        return slug
+    stem_hash = hashlib.sha1(path.stem.encode("utf-8")).hexdigest()[:8]
+    return f"episode-{stem_hash}"
 
 
 @dataclass(frozen=True)

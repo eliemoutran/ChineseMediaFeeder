@@ -8,6 +8,16 @@ def test_slugify_episode_uses_filename_stem_safely():
     assert slugify_episode(Path("  中文 Episode 02.mov")) == "episode-02"
 
 
+def test_slugify_episode_hashes_distinct_unicode_only_stems():
+    first_slug = slugify_episode(Path("第一集.mp4"))
+    second_slug = slugify_episode(Path("第二集.mp4"))
+
+    assert first_slug != second_slug
+    assert first_slug.startswith("episode-")
+    assert second_slug.startswith("episode-")
+    assert slugify_episode(Path("第一集.mp4")) == first_slug
+
+
 def test_episode_paths_follow_output_contract(tmp_path):
     paths = EpisodePaths.from_input(
         input_path=tmp_path / "input" / "peppa-001.mp4",
@@ -47,9 +57,14 @@ def test_episode_paths_ensure_directories_creates_work_and_output_dirs(tmp_path)
 def test_scan_input_videos_returns_supported_files_sorted(tmp_path):
     (tmp_path / "b.mp4").write_text("video")
     (tmp_path / "a.mkv").write_text("video")
+    (tmp_path / "c.MP4").write_text("video")
     (tmp_path / "notes.txt").write_text("not video")
 
-    assert scan_input_videos(tmp_path) == [tmp_path / "a.mkv", tmp_path / "b.mp4"]
+    assert scan_input_videos(tmp_path) == [
+        tmp_path / "a.mkv",
+        tmp_path / "b.mp4",
+        tmp_path / "c.MP4",
+    ]
 
 
 def test_scan_input_videos_returns_empty_for_missing_dir(tmp_path):

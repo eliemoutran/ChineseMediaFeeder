@@ -1,5 +1,7 @@
+from datetime import datetime
 from pathlib import Path
 
+import chinese_media_feeder.manifest as manifest
 from chinese_media_feeder.manifest import ManifestStore
 
 
@@ -59,3 +61,21 @@ def test_manifest_update_step_stores_outputs_error_and_step_updated_at(tmp_path)
     assert episode["outputs"]["mode2"] == "media/output/peppa-001/peppa-001.mode2-pinyin.mp4"
     assert step["error"] == "ffmpeg failed"
     assert "updated_at" in step
+
+
+def test_manifest_update_step_uses_one_timezone_aware_timestamp(tmp_path, monkeypatch):
+    store = ManifestStore(tmp_path / "manifest.json")
+    timestamps = iter(["2026-05-20T10:00:00+00:00", "2026-05-20T10:00:01+00:00"])
+    monkeypatch.setattr(manifest, "_now_iso", lambda: next(timestamps))
+
+    store.update_step(
+        slug="peppa-001",
+        input_path=Path("media/input/peppa-001.mp4"),
+        step="render",
+        status="complete",
+    )
+
+    episode = store.load()["episodes"]["peppa-001"]
+    timestamp = episode["updated_at"]
+    assert episode["steps"]["render"]["updated_at"] == timestamp
+    assert datetime.fromisoformat(timestamp).tzinfo is not None

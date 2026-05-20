@@ -34,6 +34,7 @@ class ManifestStore:
         error: str | None = None,
     ) -> None:
         data = self.load()
+        updated_at = _now_iso()
         episode = data["episodes"].setdefault(slug, {})
         episode["input_path"] = _path_to_manifest(input_path)
         episode.setdefault("steps", {})
@@ -42,7 +43,7 @@ class ManifestStore:
         episode.setdefault("models", {})
         episode["steps"][step] = {
             "status": status,
-            "updated_at": _now_iso(),
+            "updated_at": updated_at,
         }
         if error:
             episode["steps"][step]["error"] = error
@@ -52,7 +53,7 @@ class ManifestStore:
             episode["outputs"][key] = _path_to_manifest(value)
         for key, value in (models or {}).items():
             episode["models"][key] = value
-        episode["updated_at"] = _now_iso()
+        episode["updated_at"] = updated_at
         self.save(data)
 
 
