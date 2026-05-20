@@ -18,8 +18,9 @@ class Settings:
     manifest_path: Path
 
     @classmethod
-    def from_env(cls) -> "Settings":
-        load_dotenv()
+    def from_env(cls, load_dotenv_file: bool = True) -> "Settings":
+        if load_dotenv_file:
+            load_dotenv()
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY") or None,
             transcribe_model=os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe-diarize"),

@@ -12,7 +12,7 @@ def test_settings_defaults_are_media_relative(monkeypatch):
     monkeypatch.delenv("MEDIA_OUTPUT_DIR", raising=False)
     monkeypatch.delenv("MEDIA_MANIFEST_PATH", raising=False)
 
-    settings = Settings.from_env()
+    settings = Settings.from_env(load_dotenv_file=False)
 
     assert settings.openai_api_key is None
     assert settings.transcribe_model == "gpt-4o-transcribe-diarize"
@@ -32,7 +32,7 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_OUTPUT_DIR", str(tmp_path / "out"))
     monkeypatch.setenv("MEDIA_MANIFEST_PATH", str(tmp_path / "manifest.json"))
 
-    settings = Settings.from_env()
+    settings = Settings.from_env(load_dotenv_file=False)
 
     assert settings.openai_api_key == "sk-test"
     assert settings.transcribe_model == "transcribe-override"
@@ -41,3 +41,22 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     assert settings.work_dir == tmp_path / "work"
     assert settings.output_dir == tmp_path / "out"
     assert settings.manifest_path == tmp_path / "manifest.json"
+
+
+def test_settings_ensure_directories_creates_media_directories(tmp_path):
+    settings = Settings(
+        openai_api_key=None,
+        transcribe_model="transcribe-model",
+        translation_model="translation-model",
+        input_dir=tmp_path / "input",
+        work_dir=tmp_path / "work",
+        output_dir=tmp_path / "output",
+        manifest_path=tmp_path / "state" / "manifest.json",
+    )
+
+    settings.ensure_directories()
+
+    assert settings.input_dir.is_dir()
+    assert settings.work_dir.is_dir()
+    assert settings.output_dir.is_dir()
+    assert settings.manifest_path.parent.is_dir()
