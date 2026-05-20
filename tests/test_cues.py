@@ -97,6 +97,46 @@ def test_normalize_transcript_splits_long_text_on_spaces():
     assert [(cue.start, cue.end) for cue in cues] == [(0.0, 1.33), (1.33, 4.0)]
 
 
+def test_normalize_transcript_centers_sparse_short_text_in_long_segment():
+    raw = {
+        "segments": [
+            {
+                "start": 66.158,
+                "end": 90.008,
+                "speaker": "SPEAKER_00",
+                "text": "\u4e54\u6cbb\u4e5f\u559c\u6b22\u5728\u6ce5\u5751\u91cc\u8df3",
+            }
+        ]
+    }
+
+    cues = normalize_transcript(raw)
+
+    assert cues == [
+        Cue(
+            index=1,
+            start=76.43,
+            end=79.73,
+            speaker="SPEAKER_00",
+            chinese="\u4e54\u6cbb\u4e5f\u559c\u6b22\u5728\u6ce5\u5751\u91cc\u8df3",
+        )
+    ]
+
+
+def test_normalize_transcript_skips_implausibly_short_duplicate_text():
+    raw = {
+        "segments": [
+            {
+                "start": 93.508,
+                "end": 93.558,
+                "speaker": "SPEAKER_00",
+                "text": "\u6211\u8bf4\u4e54\u6cbb,\u5982\u679c\u4f60\u8981\u5728\u6ce5\u5751\u91cc\u8df3,\u4f60\u5fc5\u987b\u5f97\u7a7f\u4e0a\u9774\u5b50\u624d\u884c\u3002",
+            }
+        ]
+    }
+
+    assert normalize_transcript(raw) == []
+
+
 def test_cue_round_trip_preserves_optional_learning_fields():
     cue = Cue(
         index=1,

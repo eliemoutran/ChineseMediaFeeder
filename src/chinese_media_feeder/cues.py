@@ -29,6 +29,9 @@ def normalize_transcript(raw: dict[str, Any]) -> list[Cue]:
             continue
         start = float(segment["start"])
         end = float(segment["end"])
+        if _is_implausibly_short_segment(text, start, end):
+            continue
+        start, end = _active_segment_window(text, start, end)
         speaker = segment.get("speaker") or segment.get("speaker_label")
         pieces = split_subtitle_text(text)
         for piece, piece_start, piece_end in _allocate_piece_times(pieces, start, end):
@@ -114,6 +117,30 @@ def _timing_weight(text: str) -> int:
     if stripped and stripped[-1] in HARD_BREAK_PUNCTUATION:
         stripped = stripped[:-1]
     return max(1, _display_len(stripped))
+
+
+def _is_implausibly_short_segment(text: str, start: float, end: float) -> bool:
+    return _segment_duration(start, end) < 0.25 and _display_len(text) > 4
+
+
+def _active_segment_window(text: str, start: float, end: float) -> tuple[float, float]:
+    duration = _segment_duration(start, end)
+    expected_duration = _expected_spoken_duration(text)
+    if duration <= expected_duration * 2.5:
+        return start, end
+
+    midpoint = start + duration / 2
+    active_start = midpoint - expected_duration / 2
+    active_end = midpoint + expected_duration / 2
+    return active_start, active_end
+
+
+def _expected_spoken_duration(text: str) -> float:
+    return min(6.0, max(1.2, _display_len(text) * 0.28 + 0.5))
+
+
+def _segment_duration(start: float, end: float) -> float:
+    return max(0.0, end - start)
 
 
 def _display_len(text: str) -> int:
