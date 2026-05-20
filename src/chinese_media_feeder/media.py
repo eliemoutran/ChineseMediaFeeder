@@ -6,9 +6,19 @@ from pathlib import Path, PurePath
 
 def _escape_ass_filter_path(path: PurePath) -> str:
     normalized = str(path).replace("\\", "/")
-    special_chars = "\\:',[];"
+    if "'" in normalized:
+        raise ValueError("Subtitle paths containing an apostrophe are not supported")
 
-    return "".join(f"\\{char}" if char in special_chars else char for char in normalized)
+    escaped = []
+    for char in normalized:
+        if char == ":":
+            escaped.append("\\\\:")
+        elif char in "[],;":
+            escaped.append("\\" + char)
+        else:
+            escaped.append(char)
+
+    return "".join(escaped)
 
 
 def build_extract_audio_command(input_path: Path, output_path: Path, bitrate: str = "48k") -> list[str]:

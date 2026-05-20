@@ -1,5 +1,8 @@
+import shutil
+import subprocess
 from pathlib import Path, PureWindowsPath
 
+import pytest
 import chinese_media_feeder.media as media
 from chinese_media_feeder.media import (
     MediaRunner,
@@ -83,17 +86,80 @@ def test_build_burn_subtitles_command_escapes_windows_ass_filter_path():
         Path("out.mp4"),
     )
 
-    assert command[5] == "ass=C\\:/Users/Bishop/media work/subs.ass"
+    assert command[5] == "ass=C\\\\:/Users/Bishop/media work/subs.ass"
 
 
 def test_build_burn_subtitles_command_escapes_filter_metacharacters():
     command = build_burn_subtitles_command(
         Path("in.mp4"),
-        Path("subs[forced],v2;director's.ass"),
+        Path("subs[forced],v2;director.ass"),
         Path("out.mp4"),
     )
 
-    assert command[5] == "ass=subs\\[forced\\]\\,v2\\;director\\'s.ass"
+    assert command[5] == "ass=subs\\[forced\\]\\,v2\\;director.ass"
+
+
+def test_build_burn_subtitles_command_rejects_apostrophe_paths():
+    with pytest.raises(ValueError, match="apostrophe"):
+        build_burn_subtitles_command(
+            Path("in.mp4"),
+            Path("director's.ass"),
+            Path("out.mp4"),
+        )
+
+
+def test_burn_subtitles_filter_path_smoke_with_ffmpeg(tmp_path):
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is not installed")
+
+    subtitle_dir = tmp_path / "episode one"
+    subtitle_dir.mkdir()
+    subtitle_path = subtitle_dir / "subs[forced],v2;director.ass"
+    subtitle_path.write_text(
+        "\n".join(
+            [
+                "[Script Info]",
+                "ScriptType: v4.00+",
+                "PlayResX: 320",
+                "PlayResY: 240",
+                "",
+                "[V4+ Styles]",
+                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+                "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1",
+                "",
+                "[Events]",
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                "Dialogue: 0,0:00:00.00,0:00:00.10,Default,,0,0,0,,Smoke",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    ass_filter = build_burn_subtitles_command(
+        Path("in.mp4"),
+        subtitle_path,
+        Path("out.mp4"),
+    )[5]
+
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=black:s=320x240:d=0.1",
+            "-vf",
+            ass_filter,
+            "-frames:v",
+            "1",
+            "-f",
+            "null",
+            "-",
+        ],
+        check=True,
+    )
 
 
 def test_media_runner_extract_audio_creates_parent_and_runs_builder_command(
