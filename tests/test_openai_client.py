@@ -33,13 +33,13 @@ class FakeAudio:
 
 
 class FakeResponses:
-    def __init__(self, response: object) -> None:
-        self.response = response
+    def __init__(self, responses: object | list[object]) -> None:
+        self.responses = list(responses) if isinstance(responses, list) else [responses]
         self.calls: list[dict] = []
 
     def create(self, **kwargs) -> object:
         self.calls.append(kwargs)
-        return self.response
+        return self.responses.pop(0)
 
 
 class FakeClient:
@@ -154,6 +154,33 @@ def test_translate_cues_empty_input_returns_empty_dict_without_api_call():
 
     assert adapter.translate_cues([]) == {}
     assert client.responses.calls == []
+
+
+def test_translate_cues_splits_large_inputs_into_exact_index_batches():
+    responses = []
+    for start, end in [(1, 40), (41, 80), (81, 98)]:
+        responses.append(
+            FakeOutputTextResponse(
+                json.dumps(
+                    {"translations": [{"index": index, "english": f"English {index}"} for index in range(start, end + 1)]}
+                )
+            )
+        )
+    client = FakeClient(translation_response=responses)
+    adapter = make_adapter(client)
+
+    translations = adapter.translate_cues([make_cue(index, f"第{index}句") for index in range(1, 99)])
+
+    assert translations == {index: f"English {index}" for index in range(1, 99)}
+    assert len(client.responses.calls) == 3
+    assert [
+        [item["index"] for item in json.loads(call["input"][1]["content"])["cues"]]
+        for call in client.responses.calls
+    ] == [
+        list(range(1, 41)),
+        list(range(41, 81)),
+        list(range(81, 99)),
+    ]
 
 
 @pytest.mark.parametrize(

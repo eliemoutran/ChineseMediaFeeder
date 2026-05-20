@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TypeVar
 
 from openai import OpenAI
 
@@ -14,6 +15,8 @@ MANDARIN_ACCURACY_PROMPT = (
     "Transcribe all Mandarin speech with high accuracy. "
     "Keep the text in simplified Chinese characters and do not translate."
 )
+TRANSLATION_BATCH_SIZE = 40
+T = TypeVar("T")
 
 
 class OpenAIAdapterError(RuntimeError):
@@ -68,6 +71,13 @@ class OpenAIAdapter:
         if not cues:
             return {}
 
+        translations: dict[int, str] = {}
+        for batch in _chunks(cues, TRANSLATION_BATCH_SIZE):
+            translations.update(self._translate_cue_batch(batch))
+        self._require_exact_indexes(translations, {cue.index for cue in cues})
+        return translations
+
+    def _translate_cue_batch(self, cues: list[Cue]) -> dict[int, str]:
         payload = [{"index": cue.index, "chinese": cue.chinese} for cue in cues]
         response = self.client.responses.create(
             model=self.translation_model,
@@ -174,3 +184,7 @@ def _response_to_dict(response) -> dict:
     if isinstance(response, dict):
         return response
     return json.loads(response)
+
+
+def _chunks(items: list[T], size: int) -> list[list[T]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]
