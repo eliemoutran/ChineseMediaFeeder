@@ -43,6 +43,41 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     assert settings.manifest_path == tmp_path / "manifest.json"
 
 
+def test_settings_loads_dotenv_from_current_working_directory(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_TRANSCRIBE_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_TRANSLATION_MODEL", raising=False)
+    monkeypatch.delenv("MEDIA_INPUT_DIR", raising=False)
+    monkeypatch.delenv("MEDIA_WORK_DIR", raising=False)
+    monkeypatch.delenv("MEDIA_OUTPUT_DIR", raising=False)
+    monkeypatch.delenv("MEDIA_MANIFEST_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "OPENAI_API_KEY=sk-cwd",
+                "OPENAI_TRANSCRIBE_MODEL=cwd-transcribe",
+                "OPENAI_TRANSLATION_MODEL=cwd-translate",
+                "MEDIA_INPUT_DIR=cwd/input",
+                "MEDIA_WORK_DIR=cwd/work",
+                "MEDIA_OUTPUT_DIR=cwd/output",
+                "MEDIA_MANIFEST_PATH=cwd/manifest.json",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    settings = Settings.from_env()
+
+    assert settings.openai_api_key == "sk-cwd"
+    assert settings.transcribe_model == "cwd-transcribe"
+    assert settings.translation_model == "cwd-translate"
+    assert settings.input_dir == Path("cwd/input")
+    assert settings.work_dir == Path("cwd/work")
+    assert settings.output_dir == Path("cwd/output")
+    assert settings.manifest_path == Path("cwd/manifest.json")
+
+
 def test_settings_ensure_directories_creates_media_directories(tmp_path):
     settings = Settings(
         openai_api_key=None,
