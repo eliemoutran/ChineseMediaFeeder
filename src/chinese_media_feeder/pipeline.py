@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -20,6 +20,13 @@ class TranscriberTranslator(Protocol):
 
     def translate_cues(self, cues: list[Cue]) -> dict[int, str]:
         ...
+
+
+@dataclass(frozen=True)
+class CueBuildResult:
+    cues: list[Cue]
+    pinyin_subtitles_changed: bool = False
+    alternating_subtitles_changed: bool = False
 
 
 class EpisodeProcessor:
@@ -89,14 +96,19 @@ class EpisodeProcessor:
                 )
                 raise
 
-        cues = self._build_cues(paths, force=force)
+        cue_result = self._build_cues(paths, force=force)
+        cues = cue_result.cues
+        pinyin_subtitles_changed = cue_result.pinyin_subtitles_changed
+        alternating_subtitles_changed = cue_result.alternating_subtitles_changed
 
         if force or not paths.pinyin_subtitle_path.exists() or not paths.alternating_subtitle_path.exists():
             try:
                 if force or not paths.pinyin_subtitle_path.exists():
                     write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                    pinyin_subtitles_changed = True
                 if force or not paths.alternating_subtitle_path.exists():
                     write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
+                    alternating_subtitles_changed = True
                 self.manifest.update_step(
                     paths.slug,
                     paths.input_path,
@@ -119,7 +131,7 @@ class EpisodeProcessor:
                 )
                 raise
 
-        if force or not paths.mode2_path.exists():
+        if force or pinyin_subtitles_changed or not paths.mode2_path.exists():
             try:
                 self.media.burn_subtitles(paths.input_path, paths.pinyin_subtitle_path, paths.mode2_path)
                 self.manifest.update_step(
@@ -133,7 +145,7 @@ class EpisodeProcessor:
                 self._record_failure(paths, "render_mode2", exc, outputs={"mode2": paths.mode2_path})
                 raise
 
-        if force or not paths.mode3_path.exists():
+        if force or alternating_subtitles_changed or not paths.mode3_path.exists():
             try:
                 self.media.burn_subtitles(paths.input_path, paths.alternating_subtitle_path, paths.mode3_path)
                 self.manifest.update_step(
@@ -149,9 +161,11 @@ class EpisodeProcessor:
 
         return paths
 
-    def _build_cues(self, paths: EpisodePaths, force: bool) -> list[Cue]:
+    def _build_cues(self, paths: EpisodePaths, force: bool) -> CueBuildResult:
         try:
             pinyin_changed = False
+            pinyin_subtitles_changed = False
+            alternating_subtitles_changed = False
             if not force and paths.normalized_cues_path.exists():
                 cues = _read_cues(paths.normalized_cues_path)
                 cues, pinyin_changed = _enrich_missing_pinyin(cues)
@@ -160,22 +174,33 @@ class EpisodeProcessor:
                 if _has_complete_cues(cues):
                     if pinyin_changed or not paths.pinyin_subtitle_path.exists():
                         write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                        pinyin_subtitles_changed = True
                     if pinyin_changed and paths.alternating_subtitle_path.exists():
                         write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
-                    return cues
+                        alternating_subtitles_changed = True
+                    return CueBuildResult(
+                        cues,
+                        pinyin_subtitles_changed=pinyin_subtitles_changed,
+                        alternating_subtitles_changed=alternating_subtitles_changed,
+                    )
             else:
                 raw_transcript = json.loads(paths.raw_transcript_path.read_text(encoding="utf-8"))
                 cues = normalize_transcript(raw_transcript)
                 cues = [replace(cue, pinyin=chinese_to_pinyin(cue.chinese)) for cue in cues]
                 _write_cues(paths.normalized_cues_path, cues)
+                pinyin_changed = True
 
             if force or pinyin_changed or not paths.pinyin_subtitle_path.exists():
                 write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                pinyin_subtitles_changed = True
 
             translations = self.openai.translate_cues(cues)
             _validate_translation_indexes(cues, translations)
             cues = [replace(cue, english=translations[cue.index]) for cue in cues]
             _write_cues(paths.normalized_cues_path, cues)
+            if paths.alternating_subtitle_path.exists():
+                write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
+                alternating_subtitles_changed = True
             self.manifest.update_step(
                 paths.slug,
                 paths.input_path,
@@ -184,7 +209,11 @@ class EpisodeProcessor:
                 artifacts={"normalized_cues": paths.normalized_cues_path},
                 models={"translation": self.settings.translation_model},
             )
-            return cues
+            return CueBuildResult(
+                cues,
+                pinyin_subtitles_changed=pinyin_subtitles_changed,
+                alternating_subtitles_changed=alternating_subtitles_changed,
+            )
         except Exception as exc:
             self._record_failure(
                 paths,

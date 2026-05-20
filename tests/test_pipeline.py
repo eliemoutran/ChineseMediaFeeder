@@ -172,6 +172,51 @@ def test_episode_processor_enriches_existing_english_cues_missing_pinyin(tmp_pat
     assert "nǐ hǎo" in paths.pinyin_subtitle_path.read_text(encoding="utf-8")
 
 
+def test_episode_processor_rerenders_modes_when_existing_subtitles_are_rewritten(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    media = FakeMediaRunner()
+    processor = EpisodeProcessor(settings=settings, openai=FailingOpenAI(), media=media)
+    paths = processor.process_paths(input_path)
+    paths.ensure_directories()
+    paths.audio_path.write_text("audio")
+    paths.raw_transcript_path.write_text(json.dumps({"segments": []}), encoding="utf-8")
+    paths.mode1_path.write_text("mode1")
+    paths.pinyin_subtitle_path.write_text("stale pinyin", encoding="utf-8")
+    paths.alternating_subtitle_path.write_text("stale alternating", encoding="utf-8")
+    paths.mode2_path.write_text("stale mode2")
+    paths.mode3_path.write_text("stale mode3")
+    paths.normalized_cues_path.write_text(
+        json.dumps(
+            [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 1.0,
+                    "speaker": "A",
+                    "chinese": "你好",
+                    "pinyin": None,
+                    "english": "Hello",
+                }
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    processor.process(input_path)
+
+    burn_calls = [call for call in media.calls if call[0] == "burn_subtitles"]
+    assert burn_calls == [
+        ("burn_subtitles", input_path, paths.pinyin_subtitle_path, paths.mode2_path),
+        ("burn_subtitles", input_path, paths.alternating_subtitle_path, paths.mode3_path),
+    ]
+    assert paths.mode2_path.read_text() == "rendered"
+    assert paths.mode3_path.read_text() == "rendered"
+
+
 def test_episode_processor_rejects_missing_translation_index_and_records_failure(tmp_path):
     input_path = make_input(tmp_path)
     settings = make_settings(tmp_path)
