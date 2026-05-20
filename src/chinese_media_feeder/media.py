@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePath
+
+
+def _escape_ass_filter_path(path: PurePath) -> str:
+    normalized = str(path).replace("\\", "/")
+    special_chars = "\\:',[];"
+
+    return "".join(f"\\{char}" if char in special_chars else char for char in normalized)
 
 
 def build_extract_audio_command(input_path: Path, output_path: Path, bitrate: str = "48k") -> list[str]:
@@ -37,14 +44,14 @@ def build_mode1_command(input_path: Path, output_path: Path) -> list[str]:
     ]
 
 
-def build_burn_subtitles_command(input_path: Path, subtitle_path: Path, output_path: Path) -> list[str]:
+def build_burn_subtitles_command(input_path: Path, subtitle_path: PurePath, output_path: Path) -> list[str]:
     return [
         "ffmpeg",
         "-y",
         "-i",
         str(input_path),
         "-vf",
-        f"ass={subtitle_path}",
+        f"ass={_escape_ass_filter_path(subtitle_path)}",
         "-c:v",
         "libx264",
         "-c:a",
