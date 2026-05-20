@@ -106,11 +106,11 @@ class EpisodeProcessor:
         if force or not paths.pinyin_subtitle_path.exists() or not paths.alternating_subtitle_path.exists():
             try:
                 if force or not paths.pinyin_subtitle_path.exists():
-                    write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                    _write_subtitle_atomically(paths.pinyin_subtitle_path, cues, mode="pinyin")
                     _delete_if_exists(paths.mode2_path)
                     pinyin_subtitles_changed = True
                 if force or not paths.alternating_subtitle_path.exists():
-                    write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
+                    _write_subtitle_atomically(paths.alternating_subtitle_path, cues, mode="alternating")
                     _delete_if_exists(paths.mode3_path)
                     alternating_subtitles_changed = True
                 self.manifest.update_step(
@@ -179,11 +179,11 @@ class EpisodeProcessor:
                     _write_cues(paths.normalized_cues_path, cues)
                 if _has_complete_cues(cues):
                     if pinyin_changed or not paths.pinyin_subtitle_path.exists():
-                        write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                        _write_subtitle_atomically(paths.pinyin_subtitle_path, cues, mode="pinyin")
                         _delete_if_exists(paths.mode2_path)
                         pinyin_subtitles_changed = True
                     if pinyin_changed and paths.alternating_subtitle_path.exists():
-                        write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
+                        _write_subtitle_atomically(paths.alternating_subtitle_path, cues, mode="alternating")
                         _delete_if_exists(paths.mode3_path)
                         alternating_subtitles_changed = True
                     return CueBuildResult(
@@ -199,7 +199,7 @@ class EpisodeProcessor:
                 pinyin_changed = True
 
             if force or pinyin_changed or not paths.pinyin_subtitle_path.exists():
-                write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                _write_subtitle_atomically(paths.pinyin_subtitle_path, cues, mode="pinyin")
                 _delete_if_exists(paths.mode2_path)
                 pinyin_subtitles_changed = True
 
@@ -208,7 +208,7 @@ class EpisodeProcessor:
             cues = [replace(cue, english=translations[cue.index]) for cue in cues]
             _write_cues(paths.normalized_cues_path, cues)
             if paths.alternating_subtitle_path.exists():
-                write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
+                _write_subtitle_atomically(paths.alternating_subtitle_path, cues, mode="alternating")
                 _delete_if_exists(paths.mode3_path)
                 alternating_subtitles_changed = True
             self.manifest.update_step(
@@ -267,6 +267,17 @@ def _write_cues(path: Path, cues: list[Cue]) -> None:
         json.dumps([cue_to_dict(cue) for cue in cues], ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def _write_subtitle_atomically(path: Path, cues: list[Cue], mode: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    try:
+        write_ass(temp_path, cues, mode=mode)
+        temp_path.replace(path)
+    except Exception:
+        _delete_if_exists(temp_path)
+        raise
 
 
 def _delete_if_exists(path: Path) -> None:
