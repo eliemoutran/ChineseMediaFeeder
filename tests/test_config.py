@@ -25,7 +25,7 @@ def test_settings_defaults_are_media_relative(monkeypatch):
 
 def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe-diarize")
+    monkeypatch.setenv("OPENAI_TRANSCRIBE_MODEL", "transcribe-override")
     monkeypatch.setenv("OPENAI_TRANSLATION_MODEL", "gpt-5.5")
     monkeypatch.setenv("MEDIA_INPUT_DIR", str(tmp_path / "in"))
     monkeypatch.setenv("MEDIA_WORK_DIR", str(tmp_path / "work"))
@@ -35,6 +35,7 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     settings = Settings.from_env()
 
     assert settings.openai_api_key == "sk-test"
+    assert settings.transcribe_model == "transcribe-override"
     assert settings.translation_model == "gpt-5.5"
     assert settings.input_dir == tmp_path / "in"
     assert settings.work_dir == tmp_path / "work"
