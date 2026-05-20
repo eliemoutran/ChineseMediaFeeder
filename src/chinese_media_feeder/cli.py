@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -27,7 +28,10 @@ def scan() -> None:
 
 
 @app.command("process")
-def process_file(input_file: Path, force: bool = False) -> None:
+def process_file(
+    input_file: Annotated[Path, typer.Argument(exists=True, readable=True, dir_okay=False)],
+    force: Annotated[bool, typer.Option("--force", help="Regenerate existing artifacts.")] = False,
+) -> None:
     settings = Settings.from_env()
     settings.ensure_directories()
     if settings.openai_api_key is None:
@@ -43,9 +47,15 @@ def process_file(input_file: Path, force: bool = False) -> None:
 
 
 @app.command("process-all")
-def process_all(force: bool = False) -> None:
+def process_all(
+    force: Annotated[bool, typer.Option("--force", help="Regenerate existing artifacts.")] = False,
+) -> None:
     settings = Settings.from_env()
     settings.ensure_directories()
+    videos = scan_input_videos(settings.input_dir)
+    if not videos:
+        typer.echo(f"No supported videos found in {settings.input_dir}")
+        return
     if settings.openai_api_key is None:
         raise typer.BadParameter("OPENAI_API_KEY is required for processing.")
     adapter = OpenAIAdapter(
@@ -54,9 +64,17 @@ def process_all(force: bool = False) -> None:
         translation_model=settings.translation_model,
     )
     processor = EpisodeProcessor(settings=settings, openai=adapter)
-    for video in scan_input_videos(settings.input_dir):
-        paths = processor.process(video, force=force)
+    failed = False
+    for video in videos:
+        try:
+            paths = processor.process(video, force=force)
+        except Exception as exc:
+            failed = True
+            typer.echo(f"Failed {video}: {exc}")
+            continue
         typer.echo(f"Generated {paths.output_dir}")
+    if failed:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -69,5 +87,12 @@ def status() -> None:
         return
     for slug, episode in sorted(episodes.items()):
         steps = episode.get("steps", {})
-        completed = [name for name, info in steps.items() if info.get("status") == "complete"]
-        typer.echo(f"{slug}\t{', '.join(completed)}")
+        statuses = []
+        for name, info in steps.items():
+            status = info.get("status")
+            step_status = f"{name}={status}"
+            error = info.get("error")
+            if error:
+                step_status = f"{step_status}({error})"
+            statuses.append(step_status)
+        typer.echo(f"{slug}\t{', '.join(statuses)}")

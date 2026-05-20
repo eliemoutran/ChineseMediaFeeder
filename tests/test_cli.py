@@ -1,7 +1,9 @@
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
+import chinese_media_feeder.cli as cli_module
 from chinese_media_feeder.cli import app
 
 
@@ -54,7 +56,34 @@ def test_status_prints_completed_manifest_steps(monkeypatch, tmp_path):
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 0
-    assert result.output == "peppa-001\textract_audio, render_mode1\n"
+    assert result.output == "peppa-001\textract_audio=complete, transcribe=failed, render_mode1=complete\n"
+
+
+def test_status_prints_failed_step_errors(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "episodes": {
+                    "peppa-001": {
+                        "steps": {
+                            "transcribe": {
+                                "status": "failed",
+                                "error": "network unavailable",
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert result.output == "peppa-001\ttranscribe=failed(network unavailable)\n"
 
 
 def test_process_requires_openai_api_key(monkeypatch, tmp_path):
@@ -67,3 +96,87 @@ def test_process_requires_openai_api_key(monkeypatch, tmp_path):
 
     assert result.exit_code != 0
     assert "OPENAI_API_KEY is required for processing." in result.output
+
+
+def test_process_uses_adapter_and_processor_with_force(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    input_file = tmp_path / "input" / "episode.mp4"
+    input_file.parent.mkdir()
+    input_file.write_text("video")
+    calls = {}
+
+    class FakeOpenAIAdapter:
+        def __init__(self, api_key, transcribe_model, translation_model):
+            calls["adapter"] = (api_key, transcribe_model, translation_model)
+
+    class FakeEpisodeProcessor:
+        def __init__(self, settings, openai):
+            calls["processor_init"] = (settings, openai)
+
+        def process(self, input_path: Path, force: bool = False):
+            calls["process"] = (input_path, force)
+
+            class Paths:
+                output_dir = tmp_path / "output" / "episode"
+
+            return Paths()
+
+    monkeypatch.setattr(cli_module, "OpenAIAdapter", FakeOpenAIAdapter)
+    monkeypatch.setattr(cli_module, "EpisodeProcessor", FakeEpisodeProcessor)
+
+    result = runner.invoke(app, ["process", str(input_file), "--force"])
+
+    assert result.exit_code == 0
+    assert calls["adapter"] == ("sk-test", "gpt-4o-transcribe-diarize", "gpt-5.4-mini")
+    assert calls["process"] == (input_file, True)
+    assert result.output == f"Generated {tmp_path / 'output' / 'episode'}\n"
+
+
+def test_process_all_empty_input_succeeds_without_openai_api_key(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["process-all"])
+
+    assert result.exit_code == 0
+    assert result.output == f"No supported videos found in {tmp_path / 'input'}\n"
+
+
+def test_process_all_continues_after_failure_and_exits_nonzero(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    failing_video = input_dir / "01 fail.mp4"
+    succeeding_video = input_dir / "02 pass.mp4"
+    failing_video.write_text("video")
+    succeeding_video.write_text("video")
+    processed = []
+
+    class FakeOpenAIAdapter:
+        def __init__(self, api_key, transcribe_model, translation_model):
+            pass
+
+    class FakeEpisodeProcessor:
+        def __init__(self, settings, openai):
+            pass
+
+        def process(self, input_path: Path, force: bool = False):
+            processed.append((input_path, force))
+            if input_path == failing_video:
+                raise RuntimeError("render failed")
+
+            class Paths:
+                output_dir = tmp_path / "output" / "02-pass"
+
+            return Paths()
+
+    monkeypatch.setattr(cli_module, "OpenAIAdapter", FakeOpenAIAdapter)
+    monkeypatch.setattr(cli_module, "EpisodeProcessor", FakeEpisodeProcessor)
+
+    result = runner.invoke(app, ["process-all", "--force"])
+
+    assert result.exit_code == 1
+    assert processed == [(failing_video, True), (succeeding_video, True)]
+    assert f"Failed {failing_video}: render failed" in result.output
+    assert f"Generated {tmp_path / 'output' / '02-pass'}" in result.output
