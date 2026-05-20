@@ -1,5 +1,14 @@
+import pytest
+
 from chinese_media_feeder.cues import Cue
-from chinese_media_feeder.subtitles import ass_time, build_alternating_events, escape_ass_text, render_ass
+from chinese_media_feeder.subtitles import (
+    ass_time,
+    build_alternating_events,
+    build_pinyin_events,
+    escape_ass_text,
+    render_ass,
+    write_ass,
+)
 
 
 def test_ass_time_formats_hundredths():
@@ -22,6 +31,17 @@ def test_build_alternating_events_switches_between_pinyin_and_english():
     assert [event.text for event in events] == ["ni hao", "Bye", "lai le"]
 
 
+def test_build_pinyin_events_uses_pinyin_and_falls_back_to_empty_string():
+    cues = [
+        Cue(index=1, start=0, end=1, speaker=None, chinese="你好", pinyin="ni hao", english="Hello"),
+        Cue(index=2, start=1, end=2, speaker=None, chinese="再见", pinyin=None, english="Bye"),
+    ]
+
+    events = build_pinyin_events(cues)
+
+    assert [event.text for event in events] == ["ni hao", ""]
+
+
 def test_render_ass_contains_dialogue_lines():
     cues = [
         Cue(index=1, start=0, end=1.5, speaker=None, chinese="你好", pinyin="ni hao", english="Hello"),
@@ -32,3 +52,29 @@ def test_render_ass_contains_dialogue_lines():
     assert "[Script Info]" in content
     assert "Style: Default" in content
     assert "Dialogue: 0,0:00:00.00,0:00:01.50,Default,,0,0,0,,ni hao" in content
+
+
+def test_render_ass_defaults_to_pinyin_mode():
+    cues = [
+        Cue(index=1, start=0, end=1.5, speaker=None, chinese="你好", pinyin="ni hao", english="Hello"),
+    ]
+
+    content = render_ass(cues)
+
+    assert "Dialogue: 0,0:00:00.00,0:00:01.50,Default,,0,0,0,,ni hao" in content
+
+
+def test_render_ass_rejects_unsupported_mode():
+    with pytest.raises(ValueError, match="Unsupported subtitle mode: unsupported"):
+        render_ass([], mode="unsupported")
+
+
+def test_write_ass_creates_parent_dirs_and_writes_utf8_content(tmp_path):
+    path = tmp_path / "nested" / "subtitles" / "episode.ass"
+    cues = [
+        Cue(index=1, start=0, end=1.5, speaker=None, chinese="你好", pinyin="nǐ hǎo", english="Hello"),
+    ]
+
+    write_ass(path, cues, mode="pinyin")
+
+    assert path.read_text(encoding="utf-8").endswith("Default,,0,0,0,,nǐ hǎo\n")

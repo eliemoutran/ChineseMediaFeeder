@@ -40,7 +40,7 @@ def build_alternating_events(cues: list[Cue]) -> list[SubtitleEvent]:
     return events
 
 
-def render_ass(cues: list[Cue], mode: str) -> str:
+def render_ass(cues: list[Cue], mode: str = "pinyin") -> str:
     if mode == "pinyin":
         events = build_pinyin_events(cues)
     elif mode == "alternating":
