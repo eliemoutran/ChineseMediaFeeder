@@ -9,6 +9,13 @@ from chinese_media_feeder.cues import Cue
 from chinese_media_feeder.transcripts import build_timing_primary_transcript
 
 
+MANDARIN_ACCURACY_PROMPT = (
+    "The audio is Mandarin Chinese from a children's cartoon. "
+    "Transcribe all Mandarin speech with high accuracy. "
+    "Keep the text in simplified Chinese characters and do not translate."
+)
+
+
 class OpenAIAdapterError(RuntimeError):
     pass
 
@@ -41,6 +48,7 @@ class OpenAIAdapter:
                 timestamp_granularities=["segment"],
                 language="zh",
                 temperature=0,
+                prompt=MANDARIN_ACCURACY_PROMPT,
             )
         return _response_to_dict(response)
 

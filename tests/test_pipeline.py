@@ -172,6 +172,51 @@ def test_episode_processor_reuses_existing_artifacts_without_openai_or_media_cal
     assert second_paths.mode3_path.stat().st_mtime_ns == mtimes["mode3"]
 
 
+def test_episode_processor_reports_skipped_stages_when_artifacts_already_exist(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    EpisodeProcessor(settings=settings, openai=FakeOpenAI(), media=FakeMediaRunner()).process(input_path)
+    events = []
+
+    processor = EpisodeProcessor(
+        settings=settings,
+        openai=FailingOpenAI(),
+        media=FakeMediaRunner(),
+        progress_callback=lambda event: events.append((event.slug, event.step, event.status)),
+    )
+
+    processor.process(input_path)
+
+    assert events == [
+        ("peppa-001", "render_mode1", "skipped"),
+        ("peppa-001", "extract_audio", "skipped"),
+        ("peppa-001", "transcribe", "skipped"),
+        ("peppa-001", "build_cues", "skipped"),
+        ("peppa-001", "write_subtitles", "skipped"),
+        ("peppa-001", "render_mode2", "skipped"),
+        ("peppa-001", "render_mode3", "skipped"),
+    ]
+
+
+def test_episode_processor_reports_started_complete_and_failed_progress(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    events = []
+
+    with pytest.raises(RuntimeError, match="mode1 failed"):
+        EpisodeProcessor(
+            settings=settings,
+            openai=FakeOpenAI(),
+            media=PartialMode1MediaRunner(),
+            progress_callback=lambda event: events.append((event.step, event.status)),
+        ).process(input_path)
+
+    assert events == [
+        ("render_mode1", "started"),
+        ("render_mode1", "failed"),
+    ]
+
+
 def test_episode_processor_enriches_existing_english_cues_missing_pinyin(tmp_path):
     input_path = make_input(tmp_path)
     settings = make_settings(tmp_path)

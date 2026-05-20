@@ -10,7 +10,7 @@ from chinese_media_feeder.config import Settings
 from chinese_media_feeder.episodes import EpisodePaths, scan_input_videos
 from chinese_media_feeder.manifest import ManifestStore
 from chinese_media_feeder.openai_client import OpenAIAdapter
-from chinese_media_feeder.pipeline import EpisodeProcessor
+from chinese_media_feeder.pipeline import EpisodeProcessor, ProgressEvent
 
 
 app = typer.Typer(help="Generate Mandarin learner video variants.")
@@ -44,6 +44,10 @@ def scan() -> None:
         typer.echo(f"No supported videos found in {settings.input_dir}")
 
 
+def echo_progress(event: ProgressEvent) -> None:
+    typer.echo(f"{event.slug}\t{event.step}={event.status}")
+
+
 @app.command("process")
 def process_file(
     input_file: Annotated[Path, typer.Argument(exists=True, readable=True, dir_okay=False)],
@@ -58,7 +62,7 @@ def process_file(
         transcribe_model=settings.transcribe_model,
         translation_model=settings.translation_model,
     )
-    processor = EpisodeProcessor(settings=settings, openai=adapter)
+    processor = EpisodeProcessor(settings=settings, openai=adapter, progress_callback=echo_progress)
     paths = processor.process(input_file, force=force)
     typer.echo(f"Generated {paths.output_dir}")
 
@@ -80,7 +84,7 @@ def process_all(
         transcribe_model=settings.transcribe_model,
         translation_model=settings.translation_model,
     )
-    processor = EpisodeProcessor(settings=settings, openai=adapter)
+    processor = EpisodeProcessor(settings=settings, openai=adapter, progress_callback=echo_progress)
     failed = False
     for video in videos:
         try:

@@ -169,11 +169,13 @@ def test_process_uses_adapter_and_processor_with_force(monkeypatch, tmp_path):
             calls["adapter"] = (api_key, transcribe_model, translation_model)
 
     class FakeEpisodeProcessor:
-        def __init__(self, settings, openai):
+        def __init__(self, settings, openai, progress_callback=None):
             calls["processor_init"] = (settings, openai)
+            calls["progress_callback"] = progress_callback
 
         def process(self, input_path: Path, force: bool = False):
             calls["process"] = (input_path, force)
+            calls["progress_callback"](type("Event", (), {"slug": "episode", "step": "render_mode1", "status": "complete"})())
 
             class Paths:
                 output_dir = tmp_path / "output" / "episode"
@@ -188,7 +190,7 @@ def test_process_uses_adapter_and_processor_with_force(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert calls["adapter"] == ("sk-test", "gpt-4o-transcribe-diarize", "gpt-5.4-mini")
     assert calls["process"] == (input_file, True)
-    assert result.output == f"Generated {tmp_path / 'output' / 'episode'}\n"
+    assert result.output == f"episode\trender_mode1=complete\nGenerated {tmp_path / 'output' / 'episode'}\n"
 
 
 def test_process_all_empty_input_succeeds_without_openai_api_key(monkeypatch, tmp_path):
@@ -216,13 +218,19 @@ def test_process_all_continues_after_failure_and_exits_nonzero(monkeypatch, tmp_
             pass
 
     class FakeEpisodeProcessor:
-        def __init__(self, settings, openai):
-            pass
+        def __init__(self, settings, openai, progress_callback=None):
+            self.progress_callback = progress_callback
 
         def process(self, input_path: Path, force: bool = False):
             processed.append((input_path, force))
             if input_path == failing_video:
+                self.progress_callback(
+                    type("Event", (), {"slug": "01-fail", "step": "render_mode1", "status": "failed"})()
+                )
                 raise RuntimeError("render failed")
+            self.progress_callback(
+                type("Event", (), {"slug": "02-pass", "step": "render_mode1", "status": "skipped"})()
+            )
 
             class Paths:
                 output_dir = tmp_path / "output" / "02-pass"
@@ -236,5 +244,7 @@ def test_process_all_continues_after_failure_and_exits_nonzero(monkeypatch, tmp_
 
     assert result.exit_code == 1
     assert processed == [(failing_video, True), (succeeding_video, True)]
+    assert "01-fail\trender_mode1=failed" in result.output
     assert f"Failed {failing_video}: render failed" in result.output
+    assert "02-pass\trender_mode1=skipped" in result.output
     assert f"Generated {tmp_path / 'output' / '02-pass'}" in result.output

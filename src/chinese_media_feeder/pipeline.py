@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
@@ -29,12 +30,29 @@ class CueBuildResult:
     alternating_subtitles_changed: bool = False
 
 
+@dataclass(frozen=True)
+class ProgressEvent:
+    slug: str
+    step: str
+    status: str
+
+
+ProgressCallback = Callable[[ProgressEvent], None]
+
+
 class EpisodeProcessor:
-    def __init__(self, settings: Settings, openai: TranscriberTranslator, media: MediaRunner | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        openai: TranscriberTranslator,
+        media: MediaRunner | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> None:
         self.settings = settings
         self.openai = openai
         self.media = media or MediaRunner()
         self.manifest = ManifestStore(settings.manifest_path)
+        self.progress_callback = progress_callback
 
     def process_paths(self, input_path: Path) -> EpisodePaths:
         return EpisodePaths.from_input(input_path, self.settings.work_dir, self.settings.output_dir)
@@ -44,6 +62,7 @@ class EpisodeProcessor:
         paths.ensure_directories()
 
         if force or not paths.mode1_path.exists():
+            self._emit_progress(paths, "render_mode1", "started")
             try:
                 self.media.render_mode1(paths.input_path, paths.mode1_path)
                 self.manifest.update_step(
@@ -53,12 +72,17 @@ class EpisodeProcessor:
                     "complete",
                     outputs={"mode1": paths.mode1_path},
                 )
+                self._emit_progress(paths, "render_mode1", "complete")
             except Exception as exc:
                 _delete_if_exists(paths.mode1_path)
                 self._record_failure(paths, "render_mode1", exc, outputs={"mode1": paths.mode1_path})
+                self._emit_progress(paths, "render_mode1", "failed")
                 raise
+        else:
+            self._emit_progress(paths, "render_mode1", "skipped")
 
         if force or not paths.audio_path.exists():
+            self._emit_progress(paths, "extract_audio", "started")
             try:
                 self.media.extract_audio(paths.input_path, paths.audio_path)
                 self.manifest.update_step(
@@ -68,12 +92,17 @@ class EpisodeProcessor:
                     "complete",
                     artifacts={"audio": paths.audio_path},
                 )
+                self._emit_progress(paths, "extract_audio", "complete")
             except Exception as exc:
                 _delete_if_exists(paths.audio_path)
                 self._record_failure(paths, "extract_audio", exc, artifacts={"audio": paths.audio_path})
+                self._emit_progress(paths, "extract_audio", "failed")
                 raise
+        else:
+            self._emit_progress(paths, "extract_audio", "skipped")
 
         if force or not paths.raw_transcript_path.exists():
+            self._emit_progress(paths, "transcribe", "started")
             try:
                 raw_transcript = self.openai.transcribe(paths.audio_path)
                 paths.raw_transcript_path.write_text(
@@ -88,6 +117,7 @@ class EpisodeProcessor:
                     artifacts={"raw_transcript": paths.raw_transcript_path},
                     models={"transcribe": self.settings.transcribe_model},
                 )
+                self._emit_progress(paths, "transcribe", "complete")
             except Exception as exc:
                 self._record_failure(
                     paths,
@@ -96,7 +126,10 @@ class EpisodeProcessor:
                     artifacts={"raw_transcript": paths.raw_transcript_path},
                     models={"transcribe": self.settings.transcribe_model},
                 )
+                self._emit_progress(paths, "transcribe", "failed")
                 raise
+        else:
+            self._emit_progress(paths, "transcribe", "skipped")
 
         cue_result = self._build_cues(paths, force=force)
         cues = cue_result.cues
@@ -104,6 +137,7 @@ class EpisodeProcessor:
         alternating_subtitles_changed = cue_result.alternating_subtitles_changed
 
         if force or not paths.pinyin_subtitle_path.exists() or not paths.alternating_subtitle_path.exists():
+            self._emit_progress(paths, "write_subtitles", "started")
             try:
                 if force or not paths.pinyin_subtitle_path.exists():
                     _invalidate_pinyin_subtitle(paths)
@@ -123,6 +157,7 @@ class EpisodeProcessor:
                         "alternating_subtitles": paths.alternating_subtitle_path,
                     },
                 )
+                self._emit_progress(paths, "write_subtitles", "complete")
             except Exception as exc:
                 self._record_failure(
                     paths,
@@ -133,9 +168,13 @@ class EpisodeProcessor:
                         "alternating_subtitles": paths.alternating_subtitle_path,
                     },
                 )
+                self._emit_progress(paths, "write_subtitles", "failed")
                 raise
+        else:
+            self._emit_progress(paths, "write_subtitles", "skipped")
 
         if force or pinyin_subtitles_changed or not paths.mode2_path.exists():
+            self._emit_progress(paths, "render_mode2", "started")
             try:
                 self.media.burn_subtitles(paths.input_path, paths.pinyin_subtitle_path, paths.mode2_path)
                 self.manifest.update_step(
@@ -145,12 +184,17 @@ class EpisodeProcessor:
                     "complete",
                     outputs={"mode2": paths.mode2_path},
                 )
+                self._emit_progress(paths, "render_mode2", "complete")
             except Exception as exc:
                 _delete_if_exists(paths.mode2_path)
                 self._record_failure(paths, "render_mode2", exc, outputs={"mode2": paths.mode2_path})
+                self._emit_progress(paths, "render_mode2", "failed")
                 raise
+        else:
+            self._emit_progress(paths, "render_mode2", "skipped")
 
         if force or alternating_subtitles_changed or not paths.mode3_path.exists():
+            self._emit_progress(paths, "render_mode3", "started")
             try:
                 self.media.burn_subtitles(paths.input_path, paths.alternating_subtitle_path, paths.mode3_path)
                 self.manifest.update_step(
@@ -160,15 +204,20 @@ class EpisodeProcessor:
                     "complete",
                     outputs={"mode3": paths.mode3_path},
                 )
+                self._emit_progress(paths, "render_mode3", "complete")
             except Exception as exc:
                 _delete_if_exists(paths.mode3_path)
                 self._record_failure(paths, "render_mode3", exc, outputs={"mode3": paths.mode3_path})
+                self._emit_progress(paths, "render_mode3", "failed")
                 raise
+        else:
+            self._emit_progress(paths, "render_mode3", "skipped")
 
         return paths
 
     def _build_cues(self, paths: EpisodePaths, force: bool) -> CueBuildResult:
         try:
+            started = False
             pinyin_changed = False
             pinyin_subtitles_changed = False
             alternating_subtitles_changed = False
@@ -176,9 +225,13 @@ class EpisodeProcessor:
                 cues = _read_cues(paths.normalized_cues_path)
                 cues, pinyin_changed = _enrich_missing_pinyin(cues)
                 if pinyin_changed:
+                    self._emit_progress(paths, "build_cues", "started")
+                    started = True
                     _write_cues(paths.normalized_cues_path, cues)
                     _write_readable_transcript(paths.readable_transcript_path, cues)
                 elif not paths.readable_transcript_path.exists():
+                    self._emit_progress(paths, "build_cues", "started")
+                    started = True
                     _write_readable_transcript(paths.readable_transcript_path, cues)
                 if _has_complete_cues(cues):
                     if pinyin_changed or not paths.pinyin_subtitle_path.exists():
@@ -189,18 +242,26 @@ class EpisodeProcessor:
                         _invalidate_alternating_subtitle(paths)
                         _write_subtitle_atomically(paths.alternating_subtitle_path, cues, mode="alternating")
                         alternating_subtitles_changed = True
-                    return CueBuildResult(
+                    result = CueBuildResult(
                         cues,
                         pinyin_subtitles_changed=pinyin_subtitles_changed,
                         alternating_subtitles_changed=alternating_subtitles_changed,
                     )
+                    self._emit_progress(paths, "build_cues", "complete" if started else "skipped")
+                    return result
             else:
+                self._emit_progress(paths, "build_cues", "started")
+                started = True
                 raw_transcript = json.loads(paths.raw_transcript_path.read_text(encoding="utf-8"))
                 cues = normalize_transcript(raw_transcript)
                 cues = [replace(cue, pinyin=chinese_to_pinyin(cue.chinese)) for cue in cues]
                 _write_cues(paths.normalized_cues_path, cues)
                 _write_readable_transcript(paths.readable_transcript_path, cues)
                 pinyin_changed = True
+
+            if not started:
+                self._emit_progress(paths, "build_cues", "started")
+                started = True
 
             if force or pinyin_changed or not paths.pinyin_subtitle_path.exists():
                 _invalidate_pinyin_subtitle(paths)
@@ -227,6 +288,7 @@ class EpisodeProcessor:
                 },
                 models={"translation": self.settings.translation_model},
             )
+            self._emit_progress(paths, "build_cues", "complete")
             return CueBuildResult(
                 cues,
                 pinyin_subtitles_changed=pinyin_subtitles_changed,
@@ -244,7 +306,13 @@ class EpisodeProcessor:
                 },
                 models={"translation": self.settings.translation_model},
             )
+            self._emit_progress(paths, "build_cues", "failed")
             raise
+
+    def _emit_progress(self, paths: EpisodePaths, step: str, status: str) -> None:
+        if self.progress_callback is None:
+            return
+        self.progress_callback(ProgressEvent(slug=paths.slug, step=step, status=status))
 
     def _record_failure(
         self,

@@ -106,8 +106,9 @@ def test_transcribe_runs_timing_pass_then_diarized_pass(tmp_path):
     assert timing_call["timestamp_granularities"] == ["segment"]
     assert timing_call["language"] == "zh"
     assert timing_call["temperature"] == 0
+    assert "Mandarin Chinese" in timing_call["prompt"]
+    assert "high accuracy" in timing_call["prompt"]
     assert "chunking_strategy" not in timing_call
-    assert "prompt" not in timing_call
 
     diarized_call = client.audio.transcriptions.calls[1]
     assert diarized_call["model"] == "whisper-test"
