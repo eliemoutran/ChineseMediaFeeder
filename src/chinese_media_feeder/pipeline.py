@@ -105,9 +105,11 @@ class EpisodeProcessor:
             try:
                 if force or not paths.pinyin_subtitle_path.exists():
                     write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                    _delete_if_exists(paths.mode2_path)
                     pinyin_subtitles_changed = True
                 if force or not paths.alternating_subtitle_path.exists():
                     write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
+                    _delete_if_exists(paths.mode3_path)
                     alternating_subtitles_changed = True
                 self.manifest.update_step(
                     paths.slug,
@@ -174,9 +176,11 @@ class EpisodeProcessor:
                 if _has_complete_cues(cues):
                     if pinyin_changed or not paths.pinyin_subtitle_path.exists():
                         write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                        _delete_if_exists(paths.mode2_path)
                         pinyin_subtitles_changed = True
                     if pinyin_changed and paths.alternating_subtitle_path.exists():
                         write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
+                        _delete_if_exists(paths.mode3_path)
                         alternating_subtitles_changed = True
                     return CueBuildResult(
                         cues,
@@ -192,6 +196,7 @@ class EpisodeProcessor:
 
             if force or pinyin_changed or not paths.pinyin_subtitle_path.exists():
                 write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                _delete_if_exists(paths.mode2_path)
                 pinyin_subtitles_changed = True
 
             translations = self.openai.translate_cues(cues)
@@ -200,6 +205,7 @@ class EpisodeProcessor:
             _write_cues(paths.normalized_cues_path, cues)
             if paths.alternating_subtitle_path.exists():
                 write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
+                _delete_if_exists(paths.mode3_path)
                 alternating_subtitles_changed = True
             self.manifest.update_step(
                 paths.slug,
@@ -257,6 +263,11 @@ def _write_cues(path: Path, cues: list[Cue]) -> None:
         json.dumps([cue_to_dict(cue) for cue in cues], ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def _delete_if_exists(path: Path) -> None:
+    if path.exists():
+        path.unlink()
 
 
 def _has_complete_cues(cues: list[Cue]) -> bool:

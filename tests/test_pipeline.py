@@ -217,6 +217,50 @@ def test_episode_processor_rerenders_modes_when_existing_subtitles_are_rewritten
     assert paths.mode3_path.read_text() == "rendered"
 
 
+def test_episode_processor_deletes_stale_mode2_when_pinyin_rewrite_is_followed_by_failure(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    paths = EpisodeProcessor(settings=settings, openai=FakeOpenAI(), media=FakeMediaRunner()).process_paths(input_path)
+    paths.ensure_directories()
+    paths.audio_path.write_text("audio")
+    paths.raw_transcript_path.write_text(json.dumps({"segments": []}), encoding="utf-8")
+    paths.mode1_path.write_text("mode1")
+    paths.pinyin_subtitle_path.write_text("stale pinyin", encoding="utf-8")
+    paths.mode2_path.write_text("stale mode2")
+    paths.normalized_cues_path.write_text(
+        json.dumps(
+            [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 1.0,
+                    "speaker": "A",
+                    "chinese": "你好",
+                    "pinyin": None,
+                    "english": None,
+                }
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="translation unavailable"):
+        EpisodeProcessor(settings=settings, openai=TranslationErrorOpenAI(), media=FakeMediaRunner()).process(input_path)
+
+    assert not paths.mode2_path.exists()
+
+    media = FakeMediaRunner()
+    EpisodeProcessor(settings=settings, openai=FakeOpenAI(translations={1: "Hello"}), media=media).process(input_path)
+
+    assert ("render_mode1", input_path, paths.mode1_path) not in media.calls
+    assert not any(call[0] == "extract_audio" for call in media.calls)
+    assert ("burn_subtitles", input_path, paths.pinyin_subtitle_path, paths.mode2_path) in media.calls
+    assert paths.mode2_path.read_text() == "rendered"
+
+
 def test_episode_processor_rejects_missing_translation_index_and_records_failure(tmp_path):
     input_path = make_input(tmp_path)
     settings = make_settings(tmp_path)
