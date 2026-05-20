@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 from chinese_media_feeder.cues import Cue
@@ -14,7 +15,9 @@ class SubtitleEvent:
 
 
 def ass_time(seconds: float) -> str:
-    total_hundredths = int(round(seconds * 100))
+    total_hundredths = int(
+        (Decimal(str(seconds)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
     hundredths = total_hundredths % 100
     total_seconds = total_hundredths // 100
     secs = total_seconds % 60

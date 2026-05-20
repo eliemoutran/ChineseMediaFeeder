@@ -21,7 +21,21 @@ def chinese_to_pinyin(text: str) -> str:
 
 
 def _handle_non_chinese(chars: str) -> list[str]:
-    return [PUNCTUATION_MAP.get(char, char) for char in chars]
+    tokens: list[str] = []
+    ascii_run: list[str] = []
+    for char in chars:
+        if char.isascii() and char.isalnum():
+            ascii_run.append(char)
+            continue
+
+        if ascii_run:
+            tokens.append("".join(ascii_run))
+            ascii_run = []
+        tokens.append(PUNCTUATION_MAP.get(char, char))
+
+    if ascii_run:
+        tokens.append("".join(ascii_run))
+    return tokens
 
 
 def _clean_spacing(text: str) -> str:
