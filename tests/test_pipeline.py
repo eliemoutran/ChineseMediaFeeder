@@ -67,6 +67,40 @@ class FailingRenderMediaRunner(FakeMediaRunner):
         raise RuntimeError("render failed")
 
 
+class PartialMode1MediaRunner(FakeMediaRunner):
+    def render_mode1(self, input_path: Path, output_path: Path) -> None:
+        self.calls.append(("render_mode1", input_path, output_path))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("partial mode1")
+        raise RuntimeError("mode1 failed")
+
+
+class PartialAudioMediaRunner(FakeMediaRunner):
+    def extract_audio(self, input_path: Path, output_path: Path, bitrate: str = "48k") -> None:
+        self.calls.append(("extract_audio", input_path, output_path, bitrate))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("partial audio")
+        raise RuntimeError("audio failed")
+
+
+class PartialMode2MediaRunner(FakeMediaRunner):
+    def burn_subtitles(self, input_path: Path, subtitle_path: Path, output_path: Path) -> None:
+        self.calls.append(("burn_subtitles", input_path, subtitle_path, output_path))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("partial mode2")
+        if "mode2" in output_path.name:
+            raise RuntimeError("mode2 failed")
+
+
+class PartialMode3MediaRunner(FakeMediaRunner):
+    def burn_subtitles(self, input_path: Path, subtitle_path: Path, output_path: Path) -> None:
+        self.calls.append(("burn_subtitles", input_path, subtitle_path, output_path))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("partial mode3")
+        if "mode3" in output_path.name:
+            raise RuntimeError("mode3 failed")
+
+
 def make_settings(tmp_path):
     return Settings(
         openai_api_key="sk-test",
@@ -329,6 +363,65 @@ def test_episode_processor_render_failure_records_manifest_failure(tmp_path):
     paths = processor.process_paths(input_path)
     assert manifest_step(settings, paths.slug, "render_mode2")["status"] == "failed"
     assert manifest_step(settings, paths.slug, "render_mode2")["error"] == "render failed"
+
+
+def test_episode_processor_deletes_partial_mode2_and_resume_rerenders(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    first_processor = EpisodeProcessor(settings=settings, openai=FakeOpenAI(), media=PartialMode2MediaRunner())
+
+    with pytest.raises(RuntimeError, match="mode2 failed"):
+        first_processor.process(input_path)
+
+    paths = first_processor.process_paths(input_path)
+    assert not paths.mode2_path.exists()
+    assert manifest_step(settings, paths.slug, "render_mode2")["status"] == "failed"
+
+    media = FakeMediaRunner()
+    EpisodeProcessor(settings=settings, openai=FailingOpenAI(), media=media).process(input_path)
+
+    assert ("burn_subtitles", input_path, paths.pinyin_subtitle_path, paths.mode2_path) in media.calls
+    assert paths.mode2_path.read_text() == "rendered"
+
+
+def test_episode_processor_deletes_partial_mode3_on_render_failure(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    processor = EpisodeProcessor(settings=settings, openai=FakeOpenAI(), media=PartialMode3MediaRunner())
+
+    with pytest.raises(RuntimeError, match="mode3 failed"):
+        processor.process(input_path)
+
+    paths = processor.process_paths(input_path)
+    assert paths.mode2_path.exists()
+    assert not paths.mode3_path.exists()
+    assert manifest_step(settings, paths.slug, "render_mode3")["status"] == "failed"
+
+
+def test_episode_processor_deletes_partial_mode1_and_audio_on_failure(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    mode1_processor = EpisodeProcessor(settings=settings, openai=FakeOpenAI(), media=PartialMode1MediaRunner())
+
+    with pytest.raises(RuntimeError, match="mode1 failed"):
+        mode1_processor.process(input_path)
+
+    paths = mode1_processor.process_paths(input_path)
+    assert not paths.mode1_path.exists()
+    assert manifest_step(settings, paths.slug, "render_mode1")["status"] == "failed"
+
+    audio_tmp_path = tmp_path / "audio_case"
+    audio_tmp_path.mkdir()
+    settings = make_settings(audio_tmp_path)
+    input_path = make_input(audio_tmp_path)
+    audio_processor = EpisodeProcessor(settings=settings, openai=FakeOpenAI(), media=PartialAudioMediaRunner())
+
+    with pytest.raises(RuntimeError, match="audio failed"):
+        audio_processor.process(input_path)
+
+    paths = audio_processor.process_paths(input_path)
+    assert not paths.audio_path.exists()
+    assert manifest_step(settings, paths.slug, "extract_audio")["status"] == "failed"
 
 
 def test_episode_processor_force_reruns_existing_stages(tmp_path):

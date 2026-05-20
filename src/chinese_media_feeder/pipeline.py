@@ -54,6 +54,7 @@ class EpisodeProcessor:
                     outputs={"mode1": paths.mode1_path},
                 )
             except Exception as exc:
+                _delete_if_exists(paths.mode1_path)
                 self._record_failure(paths, "render_mode1", exc, outputs={"mode1": paths.mode1_path})
                 raise
 
@@ -68,6 +69,7 @@ class EpisodeProcessor:
                     artifacts={"audio": paths.audio_path},
                 )
             except Exception as exc:
+                _delete_if_exists(paths.audio_path)
                 self._record_failure(paths, "extract_audio", exc, artifacts={"audio": paths.audio_path})
                 raise
 
@@ -144,6 +146,7 @@ class EpisodeProcessor:
                     outputs={"mode2": paths.mode2_path},
                 )
             except Exception as exc:
+                _delete_if_exists(paths.mode2_path)
                 self._record_failure(paths, "render_mode2", exc, outputs={"mode2": paths.mode2_path})
                 raise
 
@@ -158,6 +161,7 @@ class EpisodeProcessor:
                     outputs={"mode3": paths.mode3_path},
                 )
             except Exception as exc:
+                _delete_if_exists(paths.mode3_path)
                 self._record_failure(paths, "render_mode3", exc, outputs={"mode3": paths.mode3_path})
                 raise
 
