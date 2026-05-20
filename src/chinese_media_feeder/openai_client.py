@@ -112,10 +112,9 @@ class OpenAIAdapter:
             if "english" not in item:
                 raise OpenAIAdapterError("Each translation item must include english text.")
 
-            try:
-                index = int(item["index"])
-            except (TypeError, ValueError) as exc:
-                raise OpenAIAdapterError("Each translation index must be integer-compatible.") from exc
+            index = item["index"]
+            if type(index) is not int:
+                raise OpenAIAdapterError("Each translation index must be an integer.")
 
             english = item["english"]
             if not isinstance(english, str):

@@ -134,6 +134,9 @@ def test_translate_cues_empty_input_returns_empty_dict_without_api_call():
         (FakeOutputTextResponse('{"translations": [{"index": 1}]}'), "english"),
         (FakeOutputTextResponse('{"translations": [{"index": 1, "english": 42}]}'), "english"),
         (FakeOutputTextResponse('{"translations": [{"index": "abc", "english": "Hello."}]}'), "index"),
+        (FakeOutputTextResponse('{"translations": [{"index": "1", "english": "Hello."}]}'), "index"),
+        (FakeOutputTextResponse('{"translations": [{"index": 1.0, "english": "Hello."}]}'), "index"),
+        (FakeOutputTextResponse('{"translations": [{"index": true, "english": "Hello."}]}'), "index"),
     ],
 )
 def test_translate_cues_rejects_malformed_translation_response(response, message):
