@@ -75,6 +75,15 @@ def test_render_ass_contains_dialogue_lines():
     assert "Dialogue: 0,0:00:00.00,0:00:01.50,Default,,0,0,0,,ni hao" in content
 
 
+def test_render_ass_uses_boxed_subtitle_background():
+    content = render_ass([], mode="pinyin")
+
+    assert (
+        "Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,"
+        "&H80000000,0,0,0,0,100,100,0,0,3,8,0,2,60,60,54,1"
+    ) in content
+
+
 def test_render_ass_defaults_to_pinyin_mode():
     cues = [
         Cue(index=1, start=0, end=1.5, speaker=None, chinese="你好", pinyin="ni hao", english="Hello"),
