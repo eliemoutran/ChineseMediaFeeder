@@ -307,6 +307,7 @@ def test_episode_processor_failed_subtitle_write_leaves_no_partial_and_resumes_r
     paths.audio_path.write_text("audio")
     paths.raw_transcript_path.write_text(json.dumps({"segments": []}), encoding="utf-8")
     paths.mode1_path.write_text("mode1")
+    paths.pinyin_subtitle_path.write_text("stale pinyin subtitle", encoding="utf-8")
     paths.mode2_path.write_text("stale mode2")
     paths.alternating_subtitle_path.write_text("existing alternating", encoding="utf-8")
     paths.normalized_cues_path.write_text(
@@ -318,7 +319,7 @@ def test_episode_processor_failed_subtitle_write_leaves_no_partial_and_resumes_r
                     "end": 1.0,
                     "speaker": "A",
                     "chinese": "你好",
-                    "pinyin": "nǐ hǎo",
+                    "pinyin": None,
                     "english": "Hello",
                 }
             ],
@@ -342,7 +343,7 @@ def test_episode_processor_failed_subtitle_write_leaves_no_partial_and_resumes_r
         EpisodeProcessor(settings=settings, openai=FailingOpenAI(), media=FakeMediaRunner()).process(input_path)
 
     assert not paths.pinyin_subtitle_path.exists()
-    assert paths.mode2_path.read_text() == "stale mode2"
+    assert not paths.mode2_path.exists()
 
     monkeypatch.setattr(pipeline_module, "write_ass", real_write_ass)
     media = FakeMediaRunner()
@@ -351,6 +352,59 @@ def test_episode_processor_failed_subtitle_write_leaves_no_partial_and_resumes_r
     assert "partial subtitle" not in paths.pinyin_subtitle_path.read_text(encoding="utf-8")
     assert ("burn_subtitles", input_path, paths.pinyin_subtitle_path, paths.mode2_path) in media.calls
     assert paths.mode2_path.read_text() == "rendered"
+
+
+def test_episode_processor_failed_alternating_rewrite_removes_stale_subtitle_and_mode3(
+    tmp_path, monkeypatch
+):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    paths = EpisodeProcessor(settings=settings, openai=FakeOpenAI(), media=FakeMediaRunner()).process_paths(input_path)
+    paths.ensure_directories()
+    paths.audio_path.write_text("audio")
+    paths.raw_transcript_path.write_text(json.dumps({"segments": []}), encoding="utf-8")
+    paths.mode1_path.write_text("mode1")
+    paths.pinyin_subtitle_path.write_text("existing pinyin", encoding="utf-8")
+    paths.alternating_subtitle_path.write_text("stale alternating", encoding="utf-8")
+    paths.mode3_path.write_text("stale mode3")
+    paths.normalized_cues_path.write_text(
+        json.dumps(
+            [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 1.0,
+                    "speaker": "A",
+                    "chinese": "你好",
+                    "pinyin": "nǐ hǎo",
+                    "english": None,
+                }
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def failing_write_ass(path, cues, mode):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("partial subtitle", encoding="utf-8")
+        if mode == "alternating":
+            raise RuntimeError("alternating subtitle write failed")
+        real_write_ass(path, cues, mode=mode)
+
+    monkeypatch.setattr(pipeline_module, "write_ass", failing_write_ass)
+
+    with pytest.raises(RuntimeError, match="alternating subtitle write failed"):
+        EpisodeProcessor(
+            settings=settings,
+            openai=FakeOpenAI(translations={1: "Hello"}),
+            media=FakeMediaRunner(),
+        ).process(input_path)
+
+    assert not paths.alternating_subtitle_path.exists()
+    assert not paths.mode3_path.exists()
 
 
 def test_episode_processor_rejects_missing_translation_index_and_records_failure(tmp_path):
