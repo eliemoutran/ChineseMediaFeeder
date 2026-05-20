@@ -26,6 +26,7 @@ class EpisodePaths:
     audio_path: Path
     raw_transcript_path: Path
     normalized_cues_path: Path
+    readable_transcript_path: Path
     pinyin_subtitle_path: Path
     alternating_subtitle_path: Path
     mode1_path: Path
@@ -45,6 +46,7 @@ class EpisodePaths:
             audio_path=work_dir / "audio.m4a",
             raw_transcript_path=work_dir / "transcript.raw.json",
             normalized_cues_path=work_dir / "cues.normalized.json",
+            readable_transcript_path=work_dir / "transcript.txt",
             pinyin_subtitle_path=work_dir / "subtitles.pinyin.ass",
             alternating_subtitle_path=work_dir / "subtitles.alternating.ass",
             mode1_path=output_dir / f"{slug}.mode1-nosubs.mp4",

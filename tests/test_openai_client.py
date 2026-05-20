@@ -87,6 +87,9 @@ def test_transcribe_uses_audio_file_and_diarized_json_format(tmp_path):
     assert call["file"].closed
     assert call["response_format"] == "diarized_json"
     assert call["chunking_strategy"] == "auto"
+    assert call["language"] == "zh"
+    assert call["temperature"] == 0
+    assert "prompt" not in call
 
 
 def test_translate_cues_sends_strict_schema_and_preserves_chinese_json():

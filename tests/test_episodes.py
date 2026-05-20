@@ -31,6 +31,7 @@ def test_episode_paths_follow_output_contract(tmp_path):
     assert paths.audio_path == paths.work_dir / "audio.m4a"
     assert paths.raw_transcript_path == paths.work_dir / "transcript.raw.json"
     assert paths.normalized_cues_path == paths.work_dir / "cues.normalized.json"
+    assert paths.readable_transcript_path == paths.work_dir / "transcript.txt"
     assert paths.pinyin_subtitle_path == paths.work_dir / "subtitles.pinyin.ass"
     assert paths.alternating_subtitle_path == paths.work_dir / "subtitles.alternating.ass"
     assert paths.mode1_path == paths.output_dir / "peppa-001.mode1-nosubs.mp4"

@@ -137,6 +137,8 @@ def test_episode_processor_writes_artifacts_and_outputs(tmp_path):
 
     assert paths.raw_transcript_path.exists()
     assert paths.normalized_cues_path.exists()
+    assert paths.readable_transcript_path.exists()
+    assert "[0.00-1.00] A" in paths.readable_transcript_path.read_text(encoding="utf-8")
     assert paths.pinyin_subtitle_path.exists()
     assert paths.alternating_subtitle_path.exists()
     assert paths.mode1_path.read_text() == "mode1"

@@ -25,6 +25,8 @@ class OpenAIAdapter:
                 file=audio_file,
                 response_format="diarized_json",
                 chunking_strategy="auto",
+                language="zh",
+                temperature=0,
             )
         if hasattr(response, "model_dump"):
             return response.model_dump()

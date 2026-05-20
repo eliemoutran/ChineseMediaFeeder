@@ -177,6 +177,9 @@ class EpisodeProcessor:
                 cues, pinyin_changed = _enrich_missing_pinyin(cues)
                 if pinyin_changed:
                     _write_cues(paths.normalized_cues_path, cues)
+                    _write_readable_transcript(paths.readable_transcript_path, cues)
+                elif not paths.readable_transcript_path.exists():
+                    _write_readable_transcript(paths.readable_transcript_path, cues)
                 if _has_complete_cues(cues):
                     if pinyin_changed or not paths.pinyin_subtitle_path.exists():
                         _invalidate_pinyin_subtitle(paths)
@@ -196,6 +199,7 @@ class EpisodeProcessor:
                 cues = normalize_transcript(raw_transcript)
                 cues = [replace(cue, pinyin=chinese_to_pinyin(cue.chinese)) for cue in cues]
                 _write_cues(paths.normalized_cues_path, cues)
+                _write_readable_transcript(paths.readable_transcript_path, cues)
                 pinyin_changed = True
 
             if force or pinyin_changed or not paths.pinyin_subtitle_path.exists():
@@ -207,6 +211,7 @@ class EpisodeProcessor:
             _validate_translation_indexes(cues, translations)
             cues = [replace(cue, english=translations[cue.index]) for cue in cues]
             _write_cues(paths.normalized_cues_path, cues)
+            _write_readable_transcript(paths.readable_transcript_path, cues)
             if paths.alternating_subtitle_path.exists():
                 _invalidate_alternating_subtitle(paths)
                 _write_subtitle_atomically(paths.alternating_subtitle_path, cues, mode="alternating")
@@ -216,7 +221,10 @@ class EpisodeProcessor:
                 paths.input_path,
                 "build_cues",
                 "complete",
-                artifacts={"normalized_cues": paths.normalized_cues_path},
+                artifacts={
+                    "normalized_cues": paths.normalized_cues_path,
+                    "readable_transcript": paths.readable_transcript_path,
+                },
                 models={"translation": self.settings.translation_model},
             )
             return CueBuildResult(
@@ -231,6 +239,7 @@ class EpisodeProcessor:
                 exc,
                 artifacts={
                     "normalized_cues": paths.normalized_cues_path,
+                    "readable_transcript": paths.readable_transcript_path,
                     "pinyin_subtitles": paths.pinyin_subtitle_path,
                 },
                 models={"translation": self.settings.translation_model},
@@ -267,6 +276,19 @@ def _write_cues(path: Path, cues: list[Cue]) -> None:
         json.dumps([cue_to_dict(cue) for cue in cues], ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def _write_readable_transcript(path: Path, cues: list[Cue]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for cue in cues:
+        line = f"[{cue.start:.2f}-{cue.end:.2f}] {cue.speaker or '-'} {cue.chinese}"
+        if _has_text(cue.pinyin):
+            line = f"{line} | pinyin: {cue.pinyin}"
+        if _has_text(cue.english):
+            line = f"{line} | english: {cue.english}"
+        lines.append(line)
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
 def _write_subtitle_atomically(path: Path, cues: list[Cue], mode: str) -> None:
