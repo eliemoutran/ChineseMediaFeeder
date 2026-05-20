@@ -1,0 +1,9 @@
+services:
+  cmf:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./media:/app/media
+    command: ["cmf", "status"]
