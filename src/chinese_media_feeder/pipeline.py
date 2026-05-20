@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from chinese_media_feeder.config import Settings
-from chinese_media_feeder.cues import Cue, cue_to_dict, normalize_transcript
+from chinese_media_feeder.cues import Cue, cue_from_dict, cue_to_dict, normalize_transcript
 from chinese_media_feeder.episodes import EpisodePaths
 from chinese_media_feeder.manifest import ManifestStore
 from chinese_media_feeder.media import MediaRunner
@@ -16,10 +16,10 @@ from chinese_media_feeder.subtitles import write_ass
 
 class TranscriberTranslator(Protocol):
     def transcribe(self, audio_path: Path) -> dict:
-        raise NotImplementedError
+        ...
 
     def translate_cues(self, cues: list[Cue]) -> dict[int, str]:
-        raise NotImplementedError
+        ...
 
 
 class EpisodeProcessor:
@@ -29,96 +29,208 @@ class EpisodeProcessor:
         self.media = media or MediaRunner()
         self.manifest = ManifestStore(settings.manifest_path)
 
+    def process_paths(self, input_path: Path) -> EpisodePaths:
+        return EpisodePaths.from_input(input_path, self.settings.work_dir, self.settings.output_dir)
+
     def process(self, input_path: Path, force: bool = False) -> EpisodePaths:
-        paths = EpisodePaths.from_input(input_path, self.settings.work_dir, self.settings.output_dir)
+        paths = self.process_paths(input_path)
         paths.ensure_directories()
 
         if force or not paths.mode1_path.exists():
-            self.media.render_mode1(paths.input_path, paths.mode1_path)
-            self.manifest.update_step(
-                paths.slug,
-                paths.input_path,
-                "render_mode1",
-                "complete",
-                outputs={"mode1": paths.mode1_path},
-            )
+            try:
+                self.media.render_mode1(paths.input_path, paths.mode1_path)
+                self.manifest.update_step(
+                    paths.slug,
+                    paths.input_path,
+                    "render_mode1",
+                    "complete",
+                    outputs={"mode1": paths.mode1_path},
+                )
+            except Exception as exc:
+                self._record_failure(paths, "render_mode1", exc, outputs={"mode1": paths.mode1_path})
+                raise
 
         if force or not paths.audio_path.exists():
-            self.media.extract_audio(paths.input_path, paths.audio_path)
-            self.manifest.update_step(
-                paths.slug,
-                paths.input_path,
-                "extract_audio",
-                "complete",
-                artifacts={"audio": paths.audio_path},
-            )
+            try:
+                self.media.extract_audio(paths.input_path, paths.audio_path)
+                self.manifest.update_step(
+                    paths.slug,
+                    paths.input_path,
+                    "extract_audio",
+                    "complete",
+                    artifacts={"audio": paths.audio_path},
+                )
+            except Exception as exc:
+                self._record_failure(paths, "extract_audio", exc, artifacts={"audio": paths.audio_path})
+                raise
 
         if force or not paths.raw_transcript_path.exists():
-            raw_transcript = self.openai.transcribe(paths.audio_path)
-            paths.raw_transcript_path.write_text(
-                json.dumps(raw_transcript, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            self.manifest.update_step(
-                paths.slug,
-                paths.input_path,
-                "transcribe",
-                "complete",
-                artifacts={"raw_transcript": paths.raw_transcript_path},
-                models={"transcribe": self.settings.transcribe_model},
-            )
-        else:
-            raw_transcript = json.loads(paths.raw_transcript_path.read_text(encoding="utf-8"))
+            try:
+                raw_transcript = self.openai.transcribe(paths.audio_path)
+                paths.raw_transcript_path.write_text(
+                    json.dumps(raw_transcript, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                self.manifest.update_step(
+                    paths.slug,
+                    paths.input_path,
+                    "transcribe",
+                    "complete",
+                    artifacts={"raw_transcript": paths.raw_transcript_path},
+                    models={"transcribe": self.settings.transcribe_model},
+                )
+            except Exception as exc:
+                self._record_failure(
+                    paths,
+                    "transcribe",
+                    exc,
+                    artifacts={"raw_transcript": paths.raw_transcript_path},
+                    models={"transcribe": self.settings.transcribe_model},
+                )
+                raise
 
-        cues = normalize_transcript(raw_transcript)
-        cues = [replace(cue, pinyin=chinese_to_pinyin(cue.chinese)) for cue in cues]
-        translations = self.openai.translate_cues(cues)
-        cues = [replace(cue, english=translations.get(cue.index, "")) for cue in cues]
+        cues = self._build_cues(paths, force=force)
 
-        paths.normalized_cues_path.write_text(
-            json.dumps([cue_to_dict(cue) for cue in cues], ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        self.manifest.update_step(
-            paths.slug,
-            paths.input_path,
-            "build_cues",
-            "complete",
-            artifacts={"normalized_cues": paths.normalized_cues_path},
-            models={"translation": self.settings.translation_model},
-        )
-
-        write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
-        write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
-        self.manifest.update_step(
-            paths.slug,
-            paths.input_path,
-            "write_subtitles",
-            "complete",
-            artifacts={
-                "pinyin_subtitles": paths.pinyin_subtitle_path,
-                "alternating_subtitles": paths.alternating_subtitle_path,
-            },
-        )
+        if force or not paths.pinyin_subtitle_path.exists() or not paths.alternating_subtitle_path.exists():
+            try:
+                if force or not paths.pinyin_subtitle_path.exists():
+                    write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+                if force or not paths.alternating_subtitle_path.exists():
+                    write_ass(paths.alternating_subtitle_path, cues, mode="alternating")
+                self.manifest.update_step(
+                    paths.slug,
+                    paths.input_path,
+                    "write_subtitles",
+                    "complete",
+                    artifacts={
+                        "pinyin_subtitles": paths.pinyin_subtitle_path,
+                        "alternating_subtitles": paths.alternating_subtitle_path,
+                    },
+                )
+            except Exception as exc:
+                self._record_failure(
+                    paths,
+                    "write_subtitles",
+                    exc,
+                    artifacts={
+                        "pinyin_subtitles": paths.pinyin_subtitle_path,
+                        "alternating_subtitles": paths.alternating_subtitle_path,
+                    },
+                )
+                raise
 
         if force or not paths.mode2_path.exists():
-            self.media.burn_subtitles(paths.input_path, paths.pinyin_subtitle_path, paths.mode2_path)
-            self.manifest.update_step(
-                paths.slug,
-                paths.input_path,
-                "render_mode2",
-                "complete",
-                outputs={"mode2": paths.mode2_path},
-            )
+            try:
+                self.media.burn_subtitles(paths.input_path, paths.pinyin_subtitle_path, paths.mode2_path)
+                self.manifest.update_step(
+                    paths.slug,
+                    paths.input_path,
+                    "render_mode2",
+                    "complete",
+                    outputs={"mode2": paths.mode2_path},
+                )
+            except Exception as exc:
+                self._record_failure(paths, "render_mode2", exc, outputs={"mode2": paths.mode2_path})
+                raise
 
         if force or not paths.mode3_path.exists():
-            self.media.burn_subtitles(paths.input_path, paths.alternating_subtitle_path, paths.mode3_path)
+            try:
+                self.media.burn_subtitles(paths.input_path, paths.alternating_subtitle_path, paths.mode3_path)
+                self.manifest.update_step(
+                    paths.slug,
+                    paths.input_path,
+                    "render_mode3",
+                    "complete",
+                    outputs={"mode3": paths.mode3_path},
+                )
+            except Exception as exc:
+                self._record_failure(paths, "render_mode3", exc, outputs={"mode3": paths.mode3_path})
+                raise
+
+        return paths
+
+    def _build_cues(self, paths: EpisodePaths, force: bool) -> list[Cue]:
+        try:
+            if not force and paths.normalized_cues_path.exists():
+                cues = _read_cues(paths.normalized_cues_path)
+                if _has_complete_translations(cues):
+                    return cues
+            else:
+                raw_transcript = json.loads(paths.raw_transcript_path.read_text(encoding="utf-8"))
+                cues = normalize_transcript(raw_transcript)
+                cues = [replace(cue, pinyin=chinese_to_pinyin(cue.chinese)) for cue in cues]
+                _write_cues(paths.normalized_cues_path, cues)
+
+            if force or not paths.pinyin_subtitle_path.exists():
+                write_ass(paths.pinyin_subtitle_path, cues, mode="pinyin")
+
+            translations = self.openai.translate_cues(cues)
+            _validate_translation_indexes(cues, translations)
+            cues = [replace(cue, english=translations[cue.index]) for cue in cues]
+            _write_cues(paths.normalized_cues_path, cues)
             self.manifest.update_step(
                 paths.slug,
                 paths.input_path,
-                "render_mode3",
+                "build_cues",
                 "complete",
-                outputs={"mode3": paths.mode3_path},
+                artifacts={"normalized_cues": paths.normalized_cues_path},
+                models={"translation": self.settings.translation_model},
             )
+            return cues
+        except Exception as exc:
+            self._record_failure(
+                paths,
+                "build_cues",
+                exc,
+                artifacts={
+                    "normalized_cues": paths.normalized_cues_path,
+                    "pinyin_subtitles": paths.pinyin_subtitle_path,
+                },
+                models={"translation": self.settings.translation_model},
+            )
+            raise
 
-        return paths
+    def _record_failure(
+        self,
+        paths: EpisodePaths,
+        step: str,
+        exc: Exception,
+        artifacts: dict[str, Path] | None = None,
+        outputs: dict[str, Path] | None = None,
+        models: dict[str, str] | None = None,
+    ) -> None:
+        self.manifest.update_step(
+            paths.slug,
+            paths.input_path,
+            step,
+            "failed",
+            artifacts=artifacts,
+            outputs=outputs,
+            models=models,
+            error=str(exc),
+        )
+
+
+def _read_cues(path: Path) -> list[Cue]:
+    return [cue_from_dict(item) for item in json.loads(path.read_text(encoding="utf-8"))]
+
+
+def _write_cues(path: Path, cues: list[Cue]) -> None:
+    path.write_text(
+        json.dumps([cue_to_dict(cue) for cue in cues], ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _has_complete_translations(cues: list[Cue]) -> bool:
+    return all(cue.english is not None for cue in cues)
+
+
+def _validate_translation_indexes(cues: list[Cue], translations: dict[int, str]) -> None:
+    expected = {cue.index for cue in cues}
+    actual = set(translations)
+    if actual != expected:
+        raise ValueError(
+            "Translation indexes do not match cue indexes: "
+            f"expected {sorted(expected)}, got {sorted(actual)}"
+        )
