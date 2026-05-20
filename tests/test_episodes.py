@@ -28,9 +28,29 @@ def test_episode_paths_follow_output_contract(tmp_path):
     assert paths.mode3_path == paths.output_dir / "peppa-001.mode3-alternating.mp4"
 
 
+def test_episode_paths_ensure_directories_creates_work_and_output_dirs(tmp_path):
+    paths = EpisodePaths.from_input(
+        input_path=tmp_path / "input" / "peppa-001.mp4",
+        work_root=tmp_path / "work",
+        output_root=tmp_path / "output",
+    )
+
+    assert not paths.work_dir.exists()
+    assert not paths.output_dir.exists()
+
+    paths.ensure_directories()
+
+    assert paths.work_dir.is_dir()
+    assert paths.output_dir.is_dir()
+
+
 def test_scan_input_videos_returns_supported_files_sorted(tmp_path):
     (tmp_path / "b.mp4").write_text("video")
     (tmp_path / "a.mkv").write_text("video")
     (tmp_path / "notes.txt").write_text("not video")
 
     assert scan_input_videos(tmp_path) == [tmp_path / "a.mkv", tmp_path / "b.mp4"]
+
+
+def test_scan_input_videos_returns_empty_for_missing_dir(tmp_path):
+    assert scan_input_videos(tmp_path / "missing") == []
