@@ -1,0 +1,16 @@
+{
+  "segments": [
+    {
+      "start": 0.4,
+      "end": 2.1,
+      "text": "你好，佩奇。",
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "start": 2.2,
+      "end": 3.8,
+      "text": "你好，乔治！",
+      "speaker": "SPEAKER_01"
+    }
+  ]
+}
