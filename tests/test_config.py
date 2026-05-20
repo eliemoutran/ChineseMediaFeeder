@@ -44,7 +44,7 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
 
 
 def test_settings_loads_dotenv_from_current_working_directory(monkeypatch, tmp_path):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-stale-shell-key")
     monkeypatch.delenv("OPENAI_TRANSCRIBE_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_TRANSLATION_MODEL", raising=False)
     monkeypatch.delenv("MEDIA_INPUT_DIR", raising=False)

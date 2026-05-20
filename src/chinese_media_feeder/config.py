@@ -20,7 +20,7 @@ class Settings:
     @classmethod
     def from_env(cls, load_dotenv_file: bool = True) -> "Settings":
         if load_dotenv_file:
-            load_dotenv(Path.cwd() / ".env")
+            load_dotenv(Path.cwd() / ".env", override=True)
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY") or None,
             transcribe_model=os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe-diarize"),
