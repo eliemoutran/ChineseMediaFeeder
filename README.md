@@ -16,6 +16,11 @@ pip install -e ".[dev]"
 
 Copy `.env.example` to `.env` and set `OPENAI_API_KEY`.
 
+Transcription runs two OpenAI passes:
+
+- `whisper-1` writes the timing transcript used for subtitle cue start/end times.
+- `OPENAI_TRANSCRIBE_MODEL` adds diarized speaker context. Its text/timing is saved for QA, but it does not override the timing transcript.
+
 ## Commands
 
 ```bash

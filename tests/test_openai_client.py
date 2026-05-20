@@ -17,14 +17,14 @@ class FakeModelDumpResponse:
 
 
 class FakeTranscriptions:
-    def __init__(self, response: object) -> None:
-        self.response = response
+    def __init__(self, responses: object | list[object]) -> None:
+        self.responses = list(responses) if isinstance(responses, list) else [responses]
         self.calls: list[dict] = []
 
     def create(self, **kwargs) -> object:
         self.calls.append(kwargs)
         assert not kwargs["file"].closed
-        return self.response
+        return self.responses.pop(0)
 
 
 class FakeAudio:
@@ -70,26 +70,54 @@ def make_adapter(client: FakeClient) -> OpenAIAdapter:
     )
 
 
-def test_transcribe_uses_audio_file_and_diarized_json_format(tmp_path):
-    response_data = {"diarized_segments": []}
-    client = FakeClient(transcription_response=FakeModelDumpResponse(response_data))
+def test_transcribe_runs_timing_pass_then_diarized_pass(tmp_path):
+    timing_data = {"segments": [{"start": 0.0, "end": 1.0, "text": "ä½ å¥½"}]}
+    diarized_data = {"diarized_segments": [{"start": 0.0, "end": 1.0, "speaker": "SPEAKER_00", "text": "ä½ å¥½"}]}
+    client = FakeClient(
+        transcription_response=[
+            FakeModelDumpResponse(timing_data),
+            FakeModelDumpResponse(diarized_data),
+        ]
+    )
     adapter = make_adapter(client)
     audio_path = tmp_path / "audio.m4a"
     audio_path.write_bytes(b"fake audio")
 
     result = adapter.transcribe(audio_path)
 
-    assert result == response_data
-    assert len(client.audio.transcriptions.calls) == 1
-    call = client.audio.transcriptions.calls[0]
-    assert call["model"] == "whisper-test"
-    assert call["file"].name == str(audio_path)
-    assert call["file"].closed
-    assert call["response_format"] == "diarized_json"
-    assert call["chunking_strategy"] == "auto"
-    assert call["language"] == "zh"
-    assert call["temperature"] == 0
-    assert "prompt" not in call
+    assert result["segments"] == [
+        {
+            "start": 0.0,
+            "end": 1.0,
+            "text": "ä½ å¥½",
+            "speaker": "SPEAKER_00",
+            "diarized_text": "ä½ å¥½",
+        }
+    ]
+    assert result["timing_transcript"] == timing_data
+    assert result["diarized_transcript"] == diarized_data
+    assert len(client.audio.transcriptions.calls) == 2
+
+    timing_call = client.audio.transcriptions.calls[0]
+    assert timing_call["model"] == "whisper-1"
+    assert timing_call["file"].name == str(audio_path)
+    assert timing_call["file"].closed
+    assert timing_call["response_format"] == "verbose_json"
+    assert timing_call["timestamp_granularities"] == ["segment"]
+    assert timing_call["language"] == "zh"
+    assert timing_call["temperature"] == 0
+    assert "chunking_strategy" not in timing_call
+    assert "prompt" not in timing_call
+
+    diarized_call = client.audio.transcriptions.calls[1]
+    assert diarized_call["model"] == "whisper-test"
+    assert diarized_call["file"].name == str(audio_path)
+    assert diarized_call["file"].closed
+    assert diarized_call["response_format"] == "diarized_json"
+    assert diarized_call["chunking_strategy"] == "auto"
+    assert diarized_call["language"] == "zh"
+    assert diarized_call["temperature"] == 0
+    assert "prompt" not in diarized_call
 
 
 def test_translate_cues_sends_strict_schema_and_preserves_chinese_json():

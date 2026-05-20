@@ -6,6 +6,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from chinese_media_feeder.cues import Cue
+from chinese_media_feeder.transcripts import build_timing_primary_transcript
 
 
 class OpenAIAdapterError(RuntimeError):
@@ -13,12 +14,37 @@ class OpenAIAdapterError(RuntimeError):
 
 
 class OpenAIAdapter:
-    def __init__(self, api_key: str, transcribe_model: str, translation_model: str, client=None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        transcribe_model: str,
+        translation_model: str,
+        client=None,
+        timing_transcribe_model: str = "whisper-1",
+    ) -> None:
         self.client = client if client is not None else OpenAI(api_key=api_key)
         self.transcribe_model = transcribe_model
+        self.timing_transcribe_model = timing_transcribe_model
         self.translation_model = translation_model
 
     def transcribe(self, audio_path: Path) -> dict:
+        timing_transcript = self._transcribe_timing(audio_path)
+        diarized_transcript = self._transcribe_diarized(audio_path)
+        return build_timing_primary_transcript(timing_transcript, diarized_transcript)
+
+    def _transcribe_timing(self, audio_path: Path) -> dict:
+        with audio_path.open("rb") as audio_file:
+            response = self.client.audio.transcriptions.create(
+                model=self.timing_transcribe_model,
+                file=audio_file,
+                response_format="verbose_json",
+                timestamp_granularities=["segment"],
+                language="zh",
+                temperature=0,
+            )
+        return _response_to_dict(response)
+
+    def _transcribe_diarized(self, audio_path: Path) -> dict:
         with audio_path.open("rb") as audio_file:
             response = self.client.audio.transcriptions.create(
                 model=self.transcribe_model,
@@ -28,11 +54,7 @@ class OpenAIAdapter:
                 language="zh",
                 temperature=0,
             )
-        if hasattr(response, "model_dump"):
-            return response.model_dump()
-        if isinstance(response, dict):
-            return response
-        return json.loads(response)
+        return _response_to_dict(response)
 
     def translate_cues(self, cues: list[Cue]) -> dict[int, str]:
         if not cues:
@@ -136,3 +158,11 @@ class OpenAIAdapter:
             raise OpenAIAdapterError(f"OpenAI translation response is missing indexes: {sorted(missing)}.")
         if extra:
             raise OpenAIAdapterError(f"OpenAI translation response included extra indexes: {sorted(extra)}.")
+
+
+def _response_to_dict(response) -> dict:
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    if isinstance(response, dict):
+        return response
+    return json.loads(response)
