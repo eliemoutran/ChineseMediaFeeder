@@ -1,1 +1,13 @@
 .worktrees/
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+media/input/*
+media/work/*
+media/output/*
+media/manifest.json
+!media/input/.gitkeep
+!media/work/.gitkeep
+!media/output/.gitkeep
