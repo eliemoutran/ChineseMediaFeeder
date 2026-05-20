@@ -18,7 +18,7 @@ class Cue:
 def normalize_transcript(raw: dict[str, Any]) -> list[Cue]:
     segments = raw.get("segments") or raw.get("diarized_segments") or []
     cues: list[Cue] = []
-    for offset, segment in enumerate(segments, start=1):
+    for segment in segments:
         text = str(segment.get("text") or segment.get("transcript") or "").strip()
         if not text:
             continue
