@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 from typing import Annotated
 
 import typer
@@ -13,6 +14,22 @@ from chinese_media_feeder.pipeline import EpisodeProcessor
 
 
 app = typer.Typer(help="Generate Mandarin learner video variants.")
+
+
+def configure_unicode_output() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            continue
+
+
+@app.callback()
+def configure_cli() -> None:
+    configure_unicode_output()
 
 
 @app.command()
@@ -96,3 +113,12 @@ def status() -> None:
                 step_status = f"{step_status}({error})"
             statuses.append(step_status)
         typer.echo(f"{slug}\t{', '.join(statuses)}")
+
+
+def main() -> None:
+    configure_unicode_output()
+    app()
+
+
+if __name__ == "__main__":
+    main()

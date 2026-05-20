@@ -1,5 +1,8 @@
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 from typer.testing import CliRunner
 
@@ -31,6 +34,61 @@ def test_scan_lists_supported_videos(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert result.output == f"peppa-001\t{video}\n"
+
+
+def test_scan_handles_non_ascii_paths_with_legacy_stdout_encoding(tmp_path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    video = input_dir / "Peppa Pig 粉红猪小妹 01.mp4"
+    video.write_text("video")
+    env = cli_subprocess_env(tmp_path)
+    env["PYTHONIOENCODING"] = "cp1252"
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from chinese_media_feeder.cli import app; app()", "scan"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert f"peppa-pig-01\t{video}" in result.stdout
+
+
+def test_module_invocation_runs_cli_scan(tmp_path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    video = input_dir / "Peppa 001.mp4"
+    video.write_text("video")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "chinese_media_feeder.cli", "scan"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=cli_subprocess_env(tmp_path),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == f"peppa-001\t{video}\n"
+
+
+def cli_subprocess_env(tmp_path):
+    env = os.environ.copy()
+    repo_root = Path(__file__).resolve().parents[1]
+    env["PYTHONPATH"] = str(repo_root / "src")
+    env.pop("OPENAI_API_KEY", None)
+    env["MEDIA_INPUT_DIR"] = str(tmp_path / "input")
+    env["MEDIA_WORK_DIR"] = str(tmp_path / "work")
+    env["MEDIA_OUTPUT_DIR"] = str(tmp_path / "output")
+    env["MEDIA_MANIFEST_PATH"] = str(tmp_path / "manifest.json")
+    return env
 
 
 def test_status_prints_completed_manifest_steps(monkeypatch, tmp_path):
