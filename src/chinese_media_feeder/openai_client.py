@@ -48,7 +48,7 @@ class OpenAIAdapter:
                 model=self.timing_transcribe_model,
                 file=audio_file,
                 response_format="verbose_json",
-                timestamp_granularities=["segment"],
+                timestamp_granularities=["segment", "word"],
                 language="zh",
                 temperature=0,
                 prompt=MANDARIN_ACCURACY_PROMPT,

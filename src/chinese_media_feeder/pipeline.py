@@ -223,7 +223,7 @@ class EpisodeProcessor:
             alternating_subtitles_changed = False
             if not force and paths.normalized_cues_path.exists():
                 cues = _read_cues(paths.normalized_cues_path)
-                cues, pinyin_changed = _enrich_missing_pinyin(cues)
+                cues, pinyin_changed = _refresh_pinyin(cues)
                 if pinyin_changed:
                     self._emit_progress(paths, "build_cues", "started")
                     started = True
@@ -389,14 +389,15 @@ def _has_complete_cues(cues: list[Cue]) -> bool:
     return all(_has_text(cue.pinyin) and _has_text(cue.english) for cue in cues)
 
 
-def _enrich_missing_pinyin(cues: list[Cue]) -> tuple[list[Cue], bool]:
+def _refresh_pinyin(cues: list[Cue]) -> tuple[list[Cue], bool]:
     changed = False
     enriched = []
     for cue in cues:
-        if _has_text(cue.pinyin):
+        pinyin = chinese_to_pinyin(cue.chinese)
+        if cue.pinyin == pinyin:
             enriched.append(cue)
             continue
-        enriched.append(replace(cue, pinyin=chinese_to_pinyin(cue.chinese)))
+        enriched.append(replace(cue, pinyin=pinyin))
         changed = True
     return enriched, changed
 

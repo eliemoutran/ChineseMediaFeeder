@@ -103,7 +103,7 @@ def test_transcribe_runs_timing_pass_then_diarized_pass(tmp_path):
     assert timing_call["file"].name == str(audio_path)
     assert timing_call["file"].closed
     assert timing_call["response_format"] == "verbose_json"
-    assert timing_call["timestamp_granularities"] == ["segment"]
+    assert timing_call["timestamp_granularities"] == ["segment", "word"]
     assert timing_call["language"] == "zh"
     assert timing_call["temperature"] == 0
     assert "Mandarin Chinese" in timing_call["prompt"]

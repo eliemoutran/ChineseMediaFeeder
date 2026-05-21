@@ -251,8 +251,52 @@ def test_episode_processor_enriches_existing_english_cues_missing_pinyin(tmp_pat
     processor.process(input_path)
 
     cues = json.loads(paths.normalized_cues_path.read_text(encoding="utf-8"))
-    assert cues[0]["pinyin"] == "nǐ hǎo"
-    assert "nǐ hǎo" in paths.pinyin_subtitle_path.read_text(encoding="utf-8")
+    assert cues[0]["pinyin"] == "n\u01d0h\u01ceo"
+    assert "n\u01d0h\u01ceo" in paths.pinyin_subtitle_path.read_text(encoding="utf-8")
+
+
+def test_episode_processor_refreshes_existing_stale_pinyin_and_rerenders_modes(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    processor = EpisodeProcessor(settings=settings, openai=FailingOpenAI(), media=FakeMediaRunner())
+    paths = processor.process_paths(input_path)
+    paths.ensure_directories()
+    paths.audio_path.write_text("audio")
+    paths.raw_transcript_path.write_text(json.dumps({"segments": []}), encoding="utf-8")
+    paths.mode1_path.write_text("mode1")
+    paths.pinyin_subtitle_path.write_text("stale pinyin subtitle", encoding="utf-8")
+    paths.alternating_subtitle_path.write_text("stale alternating subtitle", encoding="utf-8")
+    paths.mode2_path.write_text("stale mode2")
+    paths.mode3_path.write_text("stale mode3")
+    paths.normalized_cues_path.write_text(
+        json.dumps(
+            [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 1.0,
+                    "speaker": "A",
+                    "chinese": "\u5317\u4eac",
+                    "pinyin": "b\u011bi j\u012bng",
+                    "english": "Beijing",
+                }
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    media = FakeMediaRunner()
+    EpisodeProcessor(settings=settings, openai=FailingOpenAI(), media=media).process(input_path)
+
+    cues = json.loads(paths.normalized_cues_path.read_text(encoding="utf-8"))
+    assert cues[0]["pinyin"] == "b\u011bij\u012bng"
+    assert ("burn_subtitles", input_path, paths.pinyin_subtitle_path, paths.mode2_path) in media.calls
+    assert ("burn_subtitles", input_path, paths.alternating_subtitle_path, paths.mode3_path) in media.calls
+    assert paths.mode2_path.read_text() == "rendered"
+    assert paths.mode3_path.read_text() == "rendered"
 
 
 def test_episode_processor_rerenders_modes_when_existing_subtitles_are_rewritten(tmp_path):
