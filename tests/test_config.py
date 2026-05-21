@@ -3,6 +3,25 @@ from pathlib import Path
 from chinese_media_feeder.config import Settings
 
 
+def test_env_example_documents_runtime_environment_variables():
+    env_example = Path(".env.example").read_text(encoding="utf-8")
+
+    for variable in [
+        "OPENAI_API_KEY",
+        "OPENAI_TRANSCRIBE_MODEL",
+        "OPENAI_TRANSLATION_MODEL",
+        "MEDIA_INPUT_DIR",
+        "MEDIA_WORK_DIR",
+        "MEDIA_OUTPUT_DIR",
+        "MEDIA_MANIFEST_PATH",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "BOT_STATE_PATH",
+        "BOT_INTERVAL_SECONDS",
+    ]:
+        assert f"{variable}=" in env_example
+
+
 def test_settings_defaults_are_media_relative(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_TRANSCRIBE_MODEL", raising=False)
