@@ -2,18 +2,26 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import time
 from typing import Annotated
 
 import typer
 
+from chinese_media_feeder.bot import BotStateStore, DailySender, DryRunTelegramClient
 from chinese_media_feeder.config import Settings
 from chinese_media_feeder.episodes import EpisodePaths, scan_input_videos
 from chinese_media_feeder.manifest import ManifestStore
 from chinese_media_feeder.openai_client import OpenAIAdapter
 from chinese_media_feeder.pipeline import EpisodeProcessor, ProgressEvent
+from chinese_media_feeder.schedule import MissingScheduleOutputError, build_day_schedule, resolve_schedule_outputs
+from chinese_media_feeder.telegram import TelegramClient
 
 
 app = typer.Typer(help="Generate Mandarin learner video variants.")
+schedule_app = typer.Typer(help="Preview the learner rotation schedule.")
+bot_app = typer.Typer(help="Send generated videos through Telegram.")
+app.add_typer(schedule_app, name="schedule")
+app.add_typer(bot_app, name="bot")
 
 
 def configure_unicode_output() -> None:
@@ -117,6 +125,103 @@ def status() -> None:
                 step_status = f"{step_status}({error})"
             statuses.append(step_status)
         typer.echo(f"{slug}\t{', '.join(statuses)}")
+
+
+@schedule_app.command("preview")
+def preview_schedule(
+    day: Annotated[int, typer.Option("--day", min=1, help="Learner day to preview.")],
+) -> None:
+    settings = Settings.from_env()
+    items = resolve_schedule_outputs(build_day_schedule(day), settings.output_dir)
+    typer.echo(f"Day {day}")
+    for item in items:
+        typer.echo(f"{item.caption}\t{item.path}")
+
+
+@bot_app.command("send-day")
+def send_bot_day(
+    day: Annotated[int, typer.Option("--day", min=1, help="Learner day to send.")],
+    force: Annotated[bool, typer.Option("--force", help="Resend even when state says this day was sent.")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Resolve and simulate sends without Telegram calls.")] = False,
+) -> None:
+    settings = Settings.from_env()
+    sender = _build_daily_sender(settings, dry_run=dry_run)
+    result = sender.send_day(day=day, force=force, dry_run=dry_run)
+    if result.sent:
+        suffix = " (dry-run)" if dry_run else ""
+        typer.echo(f"Sent day {day}{suffix}: {len(result.message_ids)} messages")
+        return
+    typer.echo(f"Skipped day {day}: {result.skipped_reason}")
+
+
+@bot_app.command("run")
+def run_bot(
+    once: Annotated[bool, typer.Option("--once", help="Send one next unsent day and exit.")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Resolve and simulate sends without Telegram calls.")] = False,
+) -> None:
+    settings = Settings.from_env()
+    sender = _build_daily_sender(settings, dry_run=dry_run)
+    while True:
+        day = sender.state.next_day()
+        result = sender.send_day(day=day, dry_run=dry_run)
+        if result.sent:
+            suffix = " (dry-run)" if dry_run else ""
+            typer.echo(f"Sent day {day}{suffix}: {len(result.message_ids)} messages")
+        else:
+            typer.echo(f"Skipped day {day}: {result.skipped_reason}")
+        if once:
+            return
+        time.sleep(settings.bot_interval_seconds)
+
+
+@bot_app.command("test")
+def test_bot(
+    with_video: Annotated[bool, typer.Option("--with-video", help="Also send the first mode 1 video.")] = False,
+) -> None:
+    settings = Settings.from_env()
+    client = _build_telegram_client(settings)
+    try:
+        client.send_message(settings.telegram_chat_id or "", "ChineseMediaFeeder bot test")
+        sent_video = False
+        if with_video:
+            video = _first_mode1_video(settings.output_dir)
+            client.send_video(settings.telegram_chat_id or "", video, "ChineseMediaFeeder test video")
+            sent_video = True
+    finally:
+        client.close()
+    if sent_video:
+        typer.echo("Sent Telegram test message and video")
+    else:
+        typer.echo("Sent Telegram test message")
+
+
+def _build_daily_sender(settings: Settings, dry_run: bool = False) -> DailySender:
+    if not dry_run and not settings.telegram_bot_token:
+        raise typer.BadParameter("TELEGRAM_BOT_TOKEN is required for bot sending.")
+    if not settings.telegram_chat_id:
+        raise typer.BadParameter("TELEGRAM_CHAT_ID is required for bot sending.")
+    telegram = DryRunTelegramClient() if dry_run else _build_telegram_client(settings)
+    return DailySender(
+        output_dir=settings.output_dir,
+        state=BotStateStore(settings.bot_state_path),
+        telegram=telegram,
+        chat_id=settings.telegram_chat_id,
+    )
+
+
+def _build_telegram_client(settings: Settings) -> TelegramClient:
+    if not settings.telegram_bot_token:
+        raise typer.BadParameter("TELEGRAM_BOT_TOKEN is required for bot sending.")
+    if not settings.telegram_chat_id:
+        raise typer.BadParameter("TELEGRAM_CHAT_ID is required for bot sending.")
+    return TelegramClient(settings.telegram_bot_token)
+
+
+def _first_mode1_video(output_dir: Path) -> Path:
+    videos = sorted(output_dir.glob("*/*.mode1-nosubs.mp4"))
+    if not videos:
+        raise typer.BadParameter(f"No mode 1 videos found in {output_dir}.")
+    return videos[0]
 
 
 def main() -> None:

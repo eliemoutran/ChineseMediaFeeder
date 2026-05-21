@@ -1,9 +1,19 @@
 services:
-  cmf:
+  generator:
     build: .
     env_file:
       - path: .env
         required: false
     volumes:
       - ./media:/app/media
-    command: ["cmf", "status"]
+    command: ["cmf", "process-all"]
+
+  bot:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./media:/app/media
+    restart: unless-stopped
+    command: ["cmf", "bot", "run"]

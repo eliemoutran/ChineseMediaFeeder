@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+from unicodedata import category
 
 from chinese_media_feeder.cues import Cue
 
@@ -106,6 +107,10 @@ def _build_subtitle_events(
 ) -> list[SubtitleEvent]:
     events: list[SubtitleEvent] = []
     for index, (cue, text) in enumerate(zip(cues, texts, strict=True)):
+        display_text = _clean_display_text(text)
+        if not display_text:
+            continue
+
         start = max(0.0, cue.start - lead_in_seconds)
         if events and start < events[-1].end:
             start = events[-1].end
@@ -115,7 +120,7 @@ def _build_subtitle_events(
             end = min(end, cues[index + 1].start)
         end = max(start, end)
 
-        events.append(SubtitleEvent(round(start, 3), round(end, 3), text))
+        events.append(SubtitleEvent(round(start, 3), round(end, 3), display_text))
     return events
 
 
@@ -126,3 +131,8 @@ def _known_speaker(speaker: str | None) -> str | None:
     if normalized in UNKNOWN_SPEAKERS:
         return None
     return normalized
+
+
+def _clean_display_text(text: str) -> str:
+    without_punctuation = "".join(char for char in text if not category(char).startswith("P"))
+    return " ".join(without_punctuation.split())

@@ -11,6 +11,10 @@ def test_settings_defaults_are_media_relative(monkeypatch):
     monkeypatch.delenv("MEDIA_WORK_DIR", raising=False)
     monkeypatch.delenv("MEDIA_OUTPUT_DIR", raising=False)
     monkeypatch.delenv("MEDIA_MANIFEST_PATH", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("BOT_STATE_PATH", raising=False)
+    monkeypatch.delenv("BOT_INTERVAL_SECONDS", raising=False)
 
     settings = Settings.from_env(load_dotenv_file=False)
 
@@ -21,6 +25,10 @@ def test_settings_defaults_are_media_relative(monkeypatch):
     assert settings.work_dir == Path("media/work")
     assert settings.output_dir == Path("media/output")
     assert settings.manifest_path == Path("media/manifest.json")
+    assert settings.telegram_bot_token is None
+    assert settings.telegram_chat_id is None
+    assert settings.bot_state_path == Path("media/bot/state.json")
+    assert settings.bot_interval_seconds == 86400
 
 
 def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
@@ -31,6 +39,10 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_WORK_DIR", str(tmp_path / "work"))
     monkeypatch.setenv("MEDIA_OUTPUT_DIR", str(tmp_path / "out"))
     monkeypatch.setenv("MEDIA_MANIFEST_PATH", str(tmp_path / "manifest.json"))
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "456")
+    monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "bot-state.json"))
+    monkeypatch.setenv("BOT_INTERVAL_SECONDS", "60")
 
     settings = Settings.from_env(load_dotenv_file=False)
 
@@ -41,6 +53,10 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     assert settings.work_dir == tmp_path / "work"
     assert settings.output_dir == tmp_path / "out"
     assert settings.manifest_path == tmp_path / "manifest.json"
+    assert settings.telegram_bot_token == "123:token"
+    assert settings.telegram_chat_id == "456"
+    assert settings.bot_state_path == tmp_path / "bot-state.json"
+    assert settings.bot_interval_seconds == 60
 
 
 def test_settings_loads_dotenv_from_current_working_directory(monkeypatch, tmp_path):
@@ -62,6 +78,10 @@ def test_settings_loads_dotenv_from_current_working_directory(monkeypatch, tmp_p
                 "MEDIA_WORK_DIR=cwd/work",
                 "MEDIA_OUTPUT_DIR=cwd/output",
                 "MEDIA_MANIFEST_PATH=cwd/manifest.json",
+                "TELEGRAM_BOT_TOKEN=cwd-token",
+                "TELEGRAM_CHAT_ID=cwd-chat",
+                "BOT_STATE_PATH=cwd/bot-state.json",
+                "BOT_INTERVAL_SECONDS=120",
             ]
         ),
         encoding="utf-8",
@@ -76,6 +96,10 @@ def test_settings_loads_dotenv_from_current_working_directory(monkeypatch, tmp_p
     assert settings.work_dir == Path("cwd/work")
     assert settings.output_dir == Path("cwd/output")
     assert settings.manifest_path == Path("cwd/manifest.json")
+    assert settings.telegram_bot_token == "cwd-token"
+    assert settings.telegram_chat_id == "cwd-chat"
+    assert settings.bot_state_path == Path("cwd/bot-state.json")
+    assert settings.bot_interval_seconds == 120
 
 
 def test_settings_ensure_directories_creates_media_directories(tmp_path):
@@ -87,6 +111,10 @@ def test_settings_ensure_directories_creates_media_directories(tmp_path):
         work_dir=tmp_path / "work",
         output_dir=tmp_path / "output",
         manifest_path=tmp_path / "state" / "manifest.json",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        bot_state_path=tmp_path / "bot" / "state.json",
+        bot_interval_seconds=86400,
     )
 
     settings.ensure_directories()
@@ -95,3 +123,4 @@ def test_settings_ensure_directories_creates_media_directories(tmp_path):
     assert settings.work_dir.is_dir()
     assert settings.output_dir.is_dir()
     assert settings.manifest_path.parent.is_dir()
+    assert settings.bot_state_path.parent.is_dir()

@@ -198,6 +198,26 @@ def test_episode_processor_reports_skipped_stages_when_artifacts_already_exist(t
     ]
 
 
+def test_episode_processor_clears_previous_build_cues_error_when_cached_cues_are_reused(tmp_path):
+    input_path = make_input(tmp_path)
+    settings = make_settings(tmp_path)
+    processor = EpisodeProcessor(settings=settings, openai=FakeOpenAI(), media=FakeMediaRunner())
+    processor.process(input_path)
+    processor.manifest.update_step(
+        "peppa-001",
+        input_path,
+        "build_cues",
+        "failed",
+        error="previous file lock",
+    )
+
+    EpisodeProcessor(settings=settings, openai=FailingOpenAI(), media=FakeMediaRunner()).process(input_path)
+
+    step = manifest_step(settings, "peppa-001", "build_cues")
+    assert step["status"] == "skipped"
+    assert "error" not in step
+
+
 def test_episode_processor_reports_started_complete_and_failed_progress(tmp_path):
     input_path = make_input(tmp_path)
     settings = make_settings(tmp_path)

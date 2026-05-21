@@ -56,7 +56,7 @@ def test_build_alternating_events_flips_only_on_speaker_change_and_inherits_unkn
     assert [event.text for event in events] == ["p1", "p2", "e3", "e4", "e5", "p6"]
 
 
-def test_build_alternating_events_uses_empty_string_for_missing_english_slot():
+def test_build_alternating_events_skips_missing_english_slot():
     cues = [
         Cue(index=1, start=0, end=1, speaker="A", chinese="你好", pinyin="ni hao", english="Hello"),
         Cue(index=2, start=1, end=2, speaker="B", chinese="再见", pinyin="zai jian", english=None),
@@ -64,10 +64,10 @@ def test_build_alternating_events_uses_empty_string_for_missing_english_slot():
 
     events = build_alternating_events(cues)
 
-    assert events[1].text == ""
+    assert [event.text for event in events] == ["ni hao"]
 
 
-def test_build_pinyin_events_uses_pinyin_and_falls_back_to_empty_string():
+def test_build_pinyin_events_uses_pinyin_and_skips_missing_pinyin():
     cues = [
         Cue(index=1, start=0, end=1, speaker=None, chinese="你好", pinyin="ni hao", english="Hello"),
         Cue(index=2, start=1, end=2, speaker=None, chinese="再见", pinyin=None, english="Bye"),
@@ -75,7 +75,30 @@ def test_build_pinyin_events_uses_pinyin_and_falls_back_to_empty_string():
 
     events = build_pinyin_events(cues)
 
-    assert [event.text for event in events] == ["ni hao", ""]
+    assert [event.text for event in events] == ["ni hao"]
+
+
+def test_build_pinyin_events_removes_display_punctuation_and_skips_punctuation_only_cues():
+    cues = [
+        Cue(index=1, start=0, end=1, speaker=None, chinese="1", pinyin="ni hao.", english=None),
+        Cue(index=2, start=1, end=2, speaker=None, chinese="2", pinyin=".", english=None),
+        Cue(index=3, start=2, end=3, speaker=None, chinese="3", pinyin="hao, ma?", english=None),
+    ]
+
+    events = build_pinyin_events(cues)
+
+    assert [event.text for event in events] == ["ni hao", "hao ma"]
+
+
+def test_build_alternating_events_removes_display_punctuation_from_english_slots():
+    cues = [
+        Cue(index=1, start=0, end=1, speaker="A", chinese="1", pinyin="ni hao.", english="Hello."),
+        Cue(index=2, start=1, end=2, speaker="B", chinese="2", pinyin="zai jian.", english="Bye!"),
+    ]
+
+    events = build_alternating_events(cues)
+
+    assert [event.text for event in events] == ["ni hao", "Bye"]
 
 
 def test_build_pinyin_events_pads_display_timing_without_overlapping_next_cue():

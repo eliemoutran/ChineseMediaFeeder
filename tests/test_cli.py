@@ -16,10 +16,15 @@ runner = CliRunner()
 def configure_media_env(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_TRANSCRIBE_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_TRANSLATION_MODEL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.setenv("MEDIA_INPUT_DIR", str(tmp_path / "input"))
     monkeypatch.setenv("MEDIA_WORK_DIR", str(tmp_path / "work"))
     monkeypatch.setenv("MEDIA_OUTPUT_DIR", str(tmp_path / "output"))
     monkeypatch.setenv("MEDIA_MANIFEST_PATH", str(tmp_path / "manifest.json"))
+    monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "bot-state.json"))
 
 
 def test_scan_lists_supported_videos(monkeypatch, tmp_path):
@@ -84,11 +89,22 @@ def cli_subprocess_env(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
     env["PYTHONPATH"] = str(repo_root / "src")
     env.pop("OPENAI_API_KEY", None)
+    env.pop("TELEGRAM_BOT_TOKEN", None)
+    env.pop("TELEGRAM_CHAT_ID", None)
     env["MEDIA_INPUT_DIR"] = str(tmp_path / "input")
     env["MEDIA_WORK_DIR"] = str(tmp_path / "work")
     env["MEDIA_OUTPUT_DIR"] = str(tmp_path / "output")
     env["MEDIA_MANIFEST_PATH"] = str(tmp_path / "manifest.json")
+    env["BOT_STATE_PATH"] = str(tmp_path / "bot-state.json")
     return env
+
+
+def make_output(output_dir: Path, slug: str, suffix: str) -> Path:
+    episode_dir = output_dir / slug
+    episode_dir.mkdir(parents=True, exist_ok=True)
+    path = episode_dir / f"{slug}{suffix}"
+    path.write_bytes(b"video")
+    return path
 
 
 def test_status_prints_completed_manifest_steps(monkeypatch, tmp_path):
@@ -248,3 +264,75 @@ def test_process_all_continues_after_failure_and_exits_nonzero(monkeypatch, tmp_
     assert f"Failed {failing_video}: render failed" in result.output
     assert "02-pass\trender_mode1=skipped" in result.output
     assert f"Generated {tmp_path / 'output' / '02-pass'}" in result.output
+
+
+def test_schedule_preview_lists_resolved_day(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    output = tmp_path / "output"
+    video = make_output(output, "peppa-001", ".mode1-nosubs.mp4")
+
+    result = runner.invoke(app, ["schedule", "preview", "--day", "1"])
+
+    assert result.exit_code == 0
+    assert result.output == f"Day 1\n📺 ep1.mp4 - Mode 1\t{video}\n"
+
+
+def test_bot_send_day_dry_run_does_not_require_token(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+    output = tmp_path / "output"
+    make_output(output, "peppa-001", ".mode1-nosubs.mp4")
+
+    result = runner.invoke(app, ["bot", "send-day", "--day", "1", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert result.output == "Sent day 1 (dry-run): 2 messages\n"
+    assert not (tmp_path / "bot-state.json").exists()
+
+
+def test_bot_send_day_requires_telegram_config_without_dry_run(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    output = tmp_path / "output"
+    make_output(output, "peppa-001", ".mode1-nosubs.mp4")
+
+    result = runner.invoke(app, ["bot", "send-day", "--day", "1"])
+
+    assert result.exit_code != 0
+    assert "TELEGRAM_BOT_TOKEN is required" in result.output
+
+
+def test_bot_test_sends_message_and_optional_video(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+    output = tmp_path / "output"
+    video = make_output(output, "peppa-001", ".mode1-nosubs.mp4")
+    calls = []
+
+    class FakeTelegramClient:
+        def __init__(self, token):
+            calls.append(("init", token))
+
+        def send_message(self, chat_id, text):
+            calls.append(("message", chat_id, text))
+            return {"message_id": 1}
+
+        def send_video(self, chat_id, video_path, caption):
+            calls.append(("video", chat_id, video_path, caption))
+            return {"message_id": 2}
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setattr(cli_module, "TelegramClient", FakeTelegramClient)
+
+    result = runner.invoke(app, ["bot", "test", "--with-video"])
+
+    assert result.exit_code == 0
+    assert calls == [
+        ("init", "token"),
+        ("message", "123", "ChineseMediaFeeder bot test"),
+        ("video", "123", video, "ChineseMediaFeeder test video"),
+        ("close",),
+    ]
+    assert result.output == "Sent Telegram test message and video\n"

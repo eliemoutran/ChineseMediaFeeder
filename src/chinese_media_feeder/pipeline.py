@@ -247,7 +247,19 @@ class EpisodeProcessor:
                         pinyin_subtitles_changed=pinyin_subtitles_changed,
                         alternating_subtitles_changed=alternating_subtitles_changed,
                     )
-                    self._emit_progress(paths, "build_cues", "complete" if started else "skipped")
+                    status = "complete" if started else "skipped"
+                    self.manifest.update_step(
+                        paths.slug,
+                        paths.input_path,
+                        "build_cues",
+                        status,
+                        artifacts={
+                            "normalized_cues": paths.normalized_cues_path,
+                            "readable_transcript": paths.readable_transcript_path,
+                        },
+                        models={"translation": self.settings.translation_model},
+                    )
+                    self._emit_progress(paths, "build_cues", status)
                     return result
             else:
                 self._emit_progress(paths, "build_cues", "started")

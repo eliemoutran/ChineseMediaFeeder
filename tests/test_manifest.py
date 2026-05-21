@@ -63,6 +63,26 @@ def test_manifest_update_step_stores_outputs_error_and_step_updated_at(tmp_path)
     assert "updated_at" in step
 
 
+def test_manifest_update_step_clears_previous_error_when_status_changes(tmp_path):
+    store = ManifestStore(tmp_path / "manifest.json")
+    store.update_step(
+        slug="peppa-001",
+        input_path=Path("media/input/peppa-001.mp4"),
+        step="render",
+        status="failed",
+        error="ffmpeg failed",
+    )
+
+    store.update_step(
+        slug="peppa-001",
+        input_path=Path("media/input/peppa-001.mp4"),
+        step="render",
+        status="skipped",
+    )
+
+    assert "error" not in store.load()["episodes"]["peppa-001"]["steps"]["render"]
+
+
 def test_manifest_update_step_uses_one_timezone_aware_timestamp(tmp_path, monkeypatch):
     store = ManifestStore(tmp_path / "manifest.json")
     timestamps = iter(["2026-05-20T10:00:00+00:00", "2026-05-20T10:00:01+00:00"])

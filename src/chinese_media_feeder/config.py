@@ -16,6 +16,10 @@ class Settings:
     work_dir: Path
     output_dir: Path
     manifest_path: Path
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    bot_state_path: Path = Path("media/bot/state.json")
+    bot_interval_seconds: int = 86400
 
     @classmethod
     def from_env(cls, load_dotenv_file: bool = True) -> "Settings":
@@ -29,6 +33,10 @@ class Settings:
             work_dir=Path(os.getenv("MEDIA_WORK_DIR", "media/work")),
             output_dir=Path(os.getenv("MEDIA_OUTPUT_DIR", "media/output")),
             manifest_path=Path(os.getenv("MEDIA_MANIFEST_PATH", "media/manifest.json")),
+            telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
+            telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,
+            bot_state_path=Path(os.getenv("BOT_STATE_PATH", "media/bot/state.json")),
+            bot_interval_seconds=int(os.getenv("BOT_INTERVAL_SECONDS", "86400")),
         )
 
     def ensure_directories(self) -> None:
@@ -36,3 +44,4 @@ class Settings:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        self.bot_state_path.parent.mkdir(parents=True, exist_ok=True)
