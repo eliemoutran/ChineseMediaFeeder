@@ -41,6 +41,18 @@ def test_send_message_posts_to_telegram_api():
     assert http.posts[0]["data"] == {"chat_id": "123", "text": "hello"}
 
 
+def test_send_message_supports_inline_keyboard_reply_markup():
+    http = FakeHttpClient(FakeResponse({"ok": True, "result": {"message_id": 1}}))
+    client = TelegramClient(token="token", http_client=http)
+    keyboard = {"inline_keyboard": [[{"text": "Watched", "callback_data": "watched:1:0"}]]}
+
+    client.send_message(chat_id="123", text="hello", reply_markup=keyboard)
+
+    assert http.posts[0]["data"]["reply_markup"] == (
+        '{"inline_keyboard":[[{"text":"Watched","callback_data":"watched:1:0"}]]}'
+    )
+
+
 def test_send_video_uploads_file_with_caption_and_dimensions(tmp_path, monkeypatch):
     video = tmp_path / "episode.mp4"
     video.write_bytes(b"video")
@@ -48,7 +60,9 @@ def test_send_video_uploads_file_with_caption_and_dimensions(tmp_path, monkeypat
     client = TelegramClient(token="token", http_client=http)
     monkeypatch.setattr(telegram_module, "probe_video_dimensions", lambda path: (1920, 1080))
 
-    result = client.send_video(chat_id="123", video_path=video, caption="caption")
+    keyboard = {"inline_keyboard": [[{"text": "Watched", "callback_data": "watched:1:0"}]]}
+
+    result = client.send_video(chat_id="123", video_path=video, caption="caption", reply_markup=keyboard)
 
     assert result == {"message_id": 2}
     post = http.posts[0]
@@ -59,6 +73,7 @@ def test_send_video_uploads_file_with_caption_and_dimensions(tmp_path, monkeypat
         "supports_streaming": "true",
         "width": "1920",
         "height": "1080",
+        "reply_markup": '{"inline_keyboard":[[{"text":"Watched","callback_data":"watched:1:0"}]]}',
     }
     assert post["files"]["video"][0] == "episode.mp4"
     assert http.closed is False
@@ -102,6 +117,27 @@ def test_telegram_client_raises_for_not_ok_response():
 
     with pytest.raises(TelegramApiError, match="bad chat"):
         client.send_message(chat_id="123", text="hello")
+
+
+def test_get_updates_posts_offset_and_timeout():
+    http = FakeHttpClient(FakeResponse({"ok": True, "result": [{"update_id": 11}]}))
+    client = TelegramClient(token="token", http_client=http)
+
+    updates = client.get_updates(offset=10, timeout=25)
+
+    assert updates == [{"update_id": 11}]
+    assert http.posts[0]["url"] == "https://api.telegram.org/bottoken/getUpdates"
+    assert http.posts[0]["data"] == {"offset": "10", "timeout": "25"}
+
+
+def test_answer_callback_query_posts_callback_id_and_text():
+    http = FakeHttpClient(FakeResponse({"ok": True, "result": True}))
+    client = TelegramClient(token="token", http_client=http)
+
+    client.answer_callback_query(callback_query_id="abc", text="Recorded")
+
+    assert http.posts[0]["url"] == "https://api.telegram.org/bottoken/answerCallbackQuery"
+    assert http.posts[0]["data"] == {"callback_query_id": "abc", "text": "Recorded"}
 
 
 def test_telegram_client_closes_owned_http_client():

@@ -20,6 +20,10 @@ class Settings:
     telegram_chat_id: str | None = None
     bot_state_path: Path = Path("media/bot/state.json")
     bot_interval_seconds: int = 86400
+    bot_timezone: str = "Asia/Manila"
+    bot_start_time: str = "07:00"
+    bot_nudge_time: str = "14:00"
+    bot_reminder_time: str = "22:00"
 
     @classmethod
     def from_env(cls, load_dotenv_file: bool = True) -> "Settings":
@@ -37,6 +41,10 @@ class Settings:
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,
             bot_state_path=Path(os.getenv("BOT_STATE_PATH", "media/bot/state.json")),
             bot_interval_seconds=int(os.getenv("BOT_INTERVAL_SECONDS", "86400")),
+            bot_timezone=os.getenv("BOT_TIMEZONE", "Asia/Manila"),
+            bot_start_time=os.getenv("BOT_START_TIME", "07:00"),
+            bot_nudge_time=os.getenv("BOT_NUDGE_TIME", "14:00"),
+            bot_reminder_time=os.getenv("BOT_REMINDER_TIME", "22:00"),
         )
 
     def ensure_directories(self) -> None:

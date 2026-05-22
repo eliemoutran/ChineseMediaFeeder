@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 import time
@@ -7,7 +8,8 @@ from typing import Annotated
 
 import typer
 
-from chinese_media_feeder.bot import BotStateStore, DailySender, DryRunTelegramClient
+from chinese_media_feeder.bot import BotStateStore, DailySender, DryRunTelegramClient, InteractiveDailySender
+from chinese_media_feeder.bot_scheduler import BotScheduleConfig, due_checkpoints, parse_hhmm
 from chinese_media_feeder.config import Settings
 from chinese_media_feeder.episodes import EpisodePaths, scan_input_videos
 from chinese_media_feeder.manifest import ManifestStore
@@ -160,18 +162,83 @@ def run_bot(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Resolve and simulate sends without Telegram calls.")] = False,
 ) -> None:
     settings = Settings.from_env()
-    sender = _build_daily_sender(settings, dry_run=dry_run)
+    sender = _build_interactive_sender(settings, dry_run=dry_run)
+    client = sender.telegram if not dry_run else None
+    update_offset: int | None = None
     while True:
-        day = sender.state.next_day()
-        result = sender.send_day(day=day, dry_run=dry_run)
-        if result.sent:
-            suffix = " (dry-run)" if dry_run else ""
-            typer.echo(f"Sent day {day}{suffix}: {len(result.message_ids)} messages")
-        else:
-            typer.echo(f"Skipped day {day}: {result.skipped_reason}")
+        _process_due_checkpoints(settings, sender)
+        if client is not None and hasattr(client, "get_updates"):
+            updates = client.get_updates(offset=update_offset, timeout=20)
+            for update in updates:
+                update_offset = max(update_offset or 0, int(update["update_id"]) + 1)
+                _process_update(sender, update, settings.telegram_chat_id or "")
         if once:
             return
-        time.sleep(settings.bot_interval_seconds)
+        time.sleep(min(settings.bot_interval_seconds, 30))
+
+
+@bot_app.command("state")
+def bot_state() -> None:
+    settings = Settings.from_env()
+    state = BotStateStore(settings.bot_state_path)
+    data = state.load()
+    session = data.get("active_session")
+    if session is None:
+        typer.echo(f"No active day. Next learner day: {state.next_day()}")
+    else:
+        remaining = int(session["total_items"]) - int(session["cursor"])
+        typer.echo(f"Active Day {session['day']}: {remaining} item(s) left. Next learner day: {state.next_day()}")
+    runtime = _effective_schedule_config(settings, state)
+    typer.echo(
+        f"Schedule: {runtime.start_time} start, {runtime.nudge_time} nudge, "
+        f"{runtime.reminder_time} reminder ({runtime.timezone_name})"
+    )
+
+
+@bot_app.command("reset")
+def bot_reset() -> None:
+    settings = Settings.from_env()
+    state = BotStateStore(settings.bot_state_path)
+    state.reset()
+    typer.echo("Bot state reset. Next learner day: 1")
+
+
+@bot_app.command("set-day")
+def bot_set_day(day: Annotated[int, typer.Option("--day", min=1, help="Next learner day.")]) -> None:
+    settings = Settings.from_env()
+    state = BotStateStore(settings.bot_state_path)
+    state.set_next_day(day)
+    typer.echo(f"Next learner day set to {day}")
+
+
+@bot_app.command("set-start")
+def bot_set_start(
+    send_time: Annotated[str, typer.Option("--time", help="Daily start time in HH:MM.")],
+    timezone_name: Annotated[str, typer.Option("--timezone", help="IANA timezone name.")] = "Asia/Manila",
+) -> None:
+    parse_hhmm(send_time)
+    settings = Settings.from_env()
+    state = BotStateStore(settings.bot_state_path)
+    state.set_runtime_config(timezone_name=timezone_name, start_time=send_time)
+    typer.echo(f"Start time set to {send_time} ({timezone_name})")
+
+
+@bot_app.command("set-nudge")
+def bot_set_nudge(send_time: Annotated[str, typer.Option("--time", help="Nudge time in HH:MM.")]) -> None:
+    parse_hhmm(send_time)
+    settings = Settings.from_env()
+    state = BotStateStore(settings.bot_state_path)
+    state.set_runtime_config(nudge_time=send_time)
+    typer.echo(f"Nudge time set to {send_time}")
+
+
+@bot_app.command("set-reminder")
+def bot_set_reminder(send_time: Annotated[str, typer.Option("--time", help="Reminder time in HH:MM.")]) -> None:
+    parse_hhmm(send_time)
+    settings = Settings.from_env()
+    state = BotStateStore(settings.bot_state_path)
+    state.set_runtime_config(reminder_time=send_time)
+    typer.echo(f"Reminder time set to {send_time}")
 
 
 @bot_app.command("test")
@@ -207,6 +274,125 @@ def _build_daily_sender(settings: Settings, dry_run: bool = False) -> DailySende
         telegram=telegram,
         chat_id=settings.telegram_chat_id,
     )
+
+
+def _build_interactive_sender(settings: Settings, dry_run: bool = False) -> InteractiveDailySender:
+    if not dry_run and not settings.telegram_bot_token:
+        raise typer.BadParameter("TELEGRAM_BOT_TOKEN is required for bot sending.")
+    if not settings.telegram_chat_id:
+        raise typer.BadParameter("TELEGRAM_CHAT_ID is required for bot sending.")
+    telegram = DryRunTelegramClient() if dry_run else _build_telegram_client(settings)
+    return InteractiveDailySender(
+        output_dir=settings.output_dir,
+        state=BotStateStore(settings.bot_state_path),
+        telegram=telegram,
+        chat_id=settings.telegram_chat_id,
+    )
+
+
+def _effective_schedule_config(settings: Settings, state: BotStateStore) -> BotScheduleConfig:
+    runtime = state.load().get("runtime_config", {})
+    return BotScheduleConfig(
+        timezone_name=runtime.get("timezone") or settings.bot_timezone,
+        start_time=runtime.get("start_time") or settings.bot_start_time,
+        nudge_time=runtime.get("nudge_time") or settings.bot_nudge_time,
+        reminder_time=runtime.get("reminder_time") or settings.bot_reminder_time,
+    )
+
+
+def _process_due_checkpoints(settings: Settings, sender: InteractiveDailySender) -> None:
+    config = _effective_schedule_config(settings, sender.state)
+    due = due_checkpoints(
+        now=datetime.now(timezone.utc),
+        config=config,
+        already_sent=sender.state.checkpoint_sent,
+    )
+    had_active_session = sender.state.current_session() is not None
+    late_first_start = any(checkpoint.kind == "start" for checkpoint in due) and not had_active_session
+    for checkpoint in due:
+        if late_first_start and checkpoint.kind != "start":
+            sender.state.record_checkpoint(checkpoint.kind, checkpoint.local_date)
+            typer.echo(f"Skipped {checkpoint.kind}: late first start")
+            continue
+        if checkpoint.kind == "start":
+            result = sender.start_or_resume_day(local_date=checkpoint.local_date)
+        elif checkpoint.kind == "nudge":
+            result = sender.send_nudge(local_date=checkpoint.local_date)
+        else:
+            result = sender.send_reminder(local_date=checkpoint.local_date)
+        if not result.sent and result.skipped_reason in {"no active session", "day already complete"}:
+            sender.state.record_checkpoint(checkpoint.kind, checkpoint.local_date)
+        if result.sent:
+            typer.echo(f"Sent {checkpoint.kind} for day {result.day}: {len(result.message_ids)} messages")
+        else:
+            typer.echo(f"Skipped {checkpoint.kind}: {result.skipped_reason}")
+
+
+def _process_update(sender: InteractiveDailySender, update: dict, expected_chat_id: str) -> None:
+    callback = update.get("callback_query")
+    if callback is not None:
+        _process_callback(sender, callback, expected_chat_id)
+        return
+    message = update.get("message")
+    if message is None:
+        return
+    chat_id = str(message.get("chat", {}).get("id", ""))
+    if chat_id != expected_chat_id:
+        return
+    text = str(message.get("text") or "").strip()
+    if text == "/state":
+        sender.telegram.send_message(expected_chat_id, sender.status_text())
+    elif text == "/today":
+        sender.send_current_item()
+    elif text == "/skip":
+        sender.skip_active_day()
+    elif text == "/reset":
+        sender.state.reset()
+        sender.telegram.send_message(expected_chat_id, "Bot state reset. Next learner day: 1")
+    elif text.startswith("/setstart "):
+        value = text.removeprefix("/setstart ").strip()
+        parse_hhmm(value)
+        sender.state.set_runtime_config(start_time=value)
+        sender.telegram.send_message(expected_chat_id, f"Start time set to {value}")
+    elif text.startswith("/setnudge "):
+        value = text.removeprefix("/setnudge ").strip()
+        parse_hhmm(value)
+        sender.state.set_runtime_config(nudge_time=value)
+        sender.telegram.send_message(expected_chat_id, f"Nudge time set to {value}")
+    elif text.startswith("/setreminder "):
+        value = text.removeprefix("/setreminder ").strip()
+        parse_hhmm(value)
+        sender.state.set_runtime_config(reminder_time=value)
+        sender.telegram.send_message(expected_chat_id, f"Reminder time set to {value}")
+    elif text == "/help":
+        sender.telegram.send_message(
+            expected_chat_id,
+            "/state\n/today\n/setstart 07:00\n/setnudge 14:00\n/setreminder 22:00\n/skip\n/reset",
+        )
+
+
+def _process_callback(sender: InteractiveDailySender, callback: dict, expected_chat_id: str) -> None:
+    chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
+    callback_id = str(callback.get("id") or "")
+    if chat_id != expected_chat_id:
+        if hasattr(sender.telegram, "answer_callback_query"):
+            sender.telegram.answer_callback_query(callback_id, "Ignored")
+        return
+    data = str(callback.get("data") or "")
+    parts = data.split(":")
+    if len(parts) != 3:
+        return
+    action, day_text, index_text = parts
+    day = int(day_text)
+    index = int(index_text)
+    if action == "watched":
+        result = sender.mark_watched(day=day, index=index)
+        if hasattr(sender.telegram, "answer_callback_query"):
+            sender.telegram.answer_callback_query(callback_id, "Recorded" if result.sent else "Already handled")
+    elif action == "resend":
+        sender.send_current_item()
+        if hasattr(sender.telegram, "answer_callback_query"):
+            sender.telegram.answer_callback_query(callback_id, "Resent")
 
 
 def _build_telegram_client(settings: Settings) -> TelegramClient:

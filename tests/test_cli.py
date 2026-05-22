@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 import sys
@@ -7,6 +8,8 @@ import sys
 from typer.testing import CliRunner
 
 import chinese_media_feeder.cli as cli_module
+from chinese_media_feeder.bot import BotStateStore, DryRunTelegramClient, InteractiveDailySender
+from chinese_media_feeder.config import Settings
 from chinese_media_feeder.cli import app
 
 
@@ -25,6 +28,10 @@ def configure_media_env(monkeypatch, tmp_path):
     monkeypatch.setenv("MEDIA_OUTPUT_DIR", str(tmp_path / "output"))
     monkeypatch.setenv("MEDIA_MANIFEST_PATH", str(tmp_path / "manifest.json"))
     monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "bot-state.json"))
+    monkeypatch.delenv("BOT_TIMEZONE", raising=False)
+    monkeypatch.delenv("BOT_START_TIME", raising=False)
+    monkeypatch.delenv("BOT_NUDGE_TIME", raising=False)
+    monkeypatch.delenv("BOT_REMINDER_TIME", raising=False)
 
 
 def test_scan_lists_supported_videos(monkeypatch, tmp_path):
@@ -96,6 +103,10 @@ def cli_subprocess_env(tmp_path):
     env["MEDIA_OUTPUT_DIR"] = str(tmp_path / "output")
     env["MEDIA_MANIFEST_PATH"] = str(tmp_path / "manifest.json")
     env["BOT_STATE_PATH"] = str(tmp_path / "bot-state.json")
+    env.pop("BOT_TIMEZONE", None)
+    env.pop("BOT_START_TIME", None)
+    env.pop("BOT_NUDGE_TIME", None)
+    env.pop("BOT_REMINDER_TIME", None)
     return env
 
 
@@ -336,3 +347,66 @@ def test_bot_test_sends_message_and_optional_video(monkeypatch, tmp_path):
         ("close",),
     ]
     assert result.output == "Sent Telegram test message and video\n"
+
+
+def test_bot_state_reset_and_set_day_commands(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    state_path = tmp_path / "bot-state.json"
+    state_path.write_text(
+        json.dumps({"completed_days": {"1": {"status": "completed"}}, "active_session": None}),
+        encoding="utf-8",
+    )
+
+    state = runner.invoke(app, ["bot", "state"])
+    reset = runner.invoke(app, ["bot", "reset"])
+    set_day = runner.invoke(app, ["bot", "set-day", "--day", "5"])
+
+    assert state.exit_code == 0
+    assert "Next learner day: 2" in state.output
+    assert reset.exit_code == 0
+    assert reset.output == "Bot state reset. Next learner day: 1\n"
+    assert set_day.exit_code == 0
+    assert set_day.output == "Next learner day set to 5\n"
+
+
+def test_bot_time_commands_persist_runtime_config(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+
+    start = runner.invoke(app, ["bot", "set-start", "--time", "08:15", "--timezone", "Asia/Manila"])
+    nudge = runner.invoke(app, ["bot", "set-nudge", "--time", "13:45"])
+    reminder = runner.invoke(app, ["bot", "set-reminder", "--time", "21:30"])
+
+    state = json.loads((tmp_path / "bot-state.json").read_text(encoding="utf-8"))
+    assert start.exit_code == 0
+    assert nudge.exit_code == 0
+    assert reminder.exit_code == 0
+    assert state["runtime_config"] == {
+        "timezone": "Asia/Manila",
+        "start_time": "08:15",
+        "nudge_time": "13:45",
+        "reminder_time": "21:30",
+    }
+
+
+def test_due_checkpoint_late_first_start_does_not_send_immediate_reminders(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    output = tmp_path / "output"
+    make_output(output, "peppa-001", ".mode1-nosubs.mp4")
+    settings = Settings.from_env(load_dotenv_file=False)
+    state = BotStateStore(tmp_path / "bot-state.json")
+    telegram = DryRunTelegramClient()
+    sender = InteractiveDailySender(output_dir=output, state=state, telegram=telegram, chat_id="123")
+
+    class FixedDateTime:
+        @staticmethod
+        def now(tz=None):
+            return datetime(2026, 5, 22, 14, 30, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(cli_module, "datetime", FixedDateTime)
+
+    cli_module._process_due_checkpoints(settings, sender)
+
+    assert [action["type"] for action in telegram.actions] == ["message", "video"]
+    assert state.checkpoint_sent("start", "2026-05-22") is True
+    assert state.checkpoint_sent("nudge", "2026-05-22") is True
+    assert state.checkpoint_sent("reminder", "2026-05-22") is True

@@ -18,6 +18,10 @@ def test_env_example_documents_runtime_environment_variables():
         "TELEGRAM_CHAT_ID",
         "BOT_STATE_PATH",
         "BOT_INTERVAL_SECONDS",
+        "BOT_TIMEZONE",
+        "BOT_START_TIME",
+        "BOT_NUDGE_TIME",
+        "BOT_REMINDER_TIME",
     ]:
         assert f"{variable}=" in env_example
 
@@ -34,6 +38,10 @@ def test_settings_defaults_are_media_relative(monkeypatch):
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("BOT_STATE_PATH", raising=False)
     monkeypatch.delenv("BOT_INTERVAL_SECONDS", raising=False)
+    monkeypatch.delenv("BOT_TIMEZONE", raising=False)
+    monkeypatch.delenv("BOT_START_TIME", raising=False)
+    monkeypatch.delenv("BOT_NUDGE_TIME", raising=False)
+    monkeypatch.delenv("BOT_REMINDER_TIME", raising=False)
 
     settings = Settings.from_env(load_dotenv_file=False)
 
@@ -48,6 +56,10 @@ def test_settings_defaults_are_media_relative(monkeypatch):
     assert settings.telegram_chat_id is None
     assert settings.bot_state_path == Path("media/bot/state.json")
     assert settings.bot_interval_seconds == 86400
+    assert settings.bot_timezone == "Asia/Manila"
+    assert settings.bot_start_time == "07:00"
+    assert settings.bot_nudge_time == "14:00"
+    assert settings.bot_reminder_time == "22:00"
 
 
 def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
@@ -62,6 +74,10 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "456")
     monkeypatch.setenv("BOT_STATE_PATH", str(tmp_path / "bot-state.json"))
     monkeypatch.setenv("BOT_INTERVAL_SECONDS", "60")
+    monkeypatch.setenv("BOT_TIMEZONE", "America/New_York")
+    monkeypatch.setenv("BOT_START_TIME", "08:30")
+    monkeypatch.setenv("BOT_NUDGE_TIME", "13:15")
+    monkeypatch.setenv("BOT_REMINDER_TIME", "21:45")
 
     settings = Settings.from_env(load_dotenv_file=False)
 
@@ -76,6 +92,10 @@ def test_settings_reads_environment_overrides(monkeypatch, tmp_path):
     assert settings.telegram_chat_id == "456"
     assert settings.bot_state_path == tmp_path / "bot-state.json"
     assert settings.bot_interval_seconds == 60
+    assert settings.bot_timezone == "America/New_York"
+    assert settings.bot_start_time == "08:30"
+    assert settings.bot_nudge_time == "13:15"
+    assert settings.bot_reminder_time == "21:45"
 
 
 def test_settings_loads_dotenv_from_current_working_directory(monkeypatch, tmp_path):
@@ -101,6 +121,10 @@ def test_settings_loads_dotenv_from_current_working_directory(monkeypatch, tmp_p
                 "TELEGRAM_CHAT_ID=cwd-chat",
                 "BOT_STATE_PATH=cwd/bot-state.json",
                 "BOT_INTERVAL_SECONDS=120",
+                "BOT_TIMEZONE=Europe/Paris",
+                "BOT_START_TIME=06:45",
+                "BOT_NUDGE_TIME=12:30",
+                "BOT_REMINDER_TIME=20:15",
             ]
         ),
         encoding="utf-8",
@@ -119,6 +143,10 @@ def test_settings_loads_dotenv_from_current_working_directory(monkeypatch, tmp_p
     assert settings.telegram_chat_id == "cwd-chat"
     assert settings.bot_state_path == Path("cwd/bot-state.json")
     assert settings.bot_interval_seconds == 120
+    assert settings.bot_timezone == "Europe/Paris"
+    assert settings.bot_start_time == "06:45"
+    assert settings.bot_nudge_time == "12:30"
+    assert settings.bot_reminder_time == "20:15"
 
 
 def test_settings_ensure_directories_creates_media_directories(tmp_path):
@@ -134,6 +162,10 @@ def test_settings_ensure_directories_creates_media_directories(tmp_path):
         telegram_chat_id=None,
         bot_state_path=tmp_path / "bot" / "state.json",
         bot_interval_seconds=86400,
+        bot_timezone="Asia/Manila",
+        bot_start_time="07:00",
+        bot_nudge_time="14:00",
+        bot_reminder_time="22:00",
     )
 
     settings.ensure_directories()

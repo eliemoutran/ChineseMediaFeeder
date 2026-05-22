@@ -18,16 +18,32 @@ class TelegramClient:
         self.http_client = http_client or httpx.Client()
         self._owns_http_client = http_client is None or hasattr(http_client, "close")
 
-    def send_message(self, chat_id: str, text: str) -> dict[str, Any]:
-        payload = self._post("sendMessage", data={"chat_id": chat_id, "text": text})
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = {"chat_id": chat_id, "text": text}
+        if reply_markup is not None:
+            data["reply_markup"] = _compact_json(reply_markup)
+        payload = self._post("sendMessage", data=data)
         return dict(payload.get("result") or {})
 
-    def send_video(self, chat_id: str, video_path: Path, caption: str) -> dict[str, Any]:
+    def send_video(
+        self,
+        chat_id: str,
+        video_path: Path,
+        caption: str,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         data = {
             "chat_id": chat_id,
             "caption": caption,
             "supports_streaming": "true",
         }
+        if reply_markup is not None:
+            data["reply_markup"] = _compact_json(reply_markup)
         dimensions = probe_video_dimensions(video_path)
         if dimensions is not None:
             width, height = dimensions
@@ -42,6 +58,23 @@ class TelegramClient:
                 timeout=300,
             )
         return dict(payload.get("result") or {})
+
+    def get_updates(self, offset: int | None = None, timeout: int = 30) -> list[dict[str, Any]]:
+        data = {"timeout": str(timeout)}
+        if offset is not None:
+            data["offset"] = str(offset)
+        payload = self._post("getUpdates", data=data, timeout=timeout + 5)
+        return list(payload.get("result") or [])
+
+    def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict[str, Any]:
+        data = {"callback_query_id": callback_query_id}
+        if text is not None:
+            data["text"] = text
+        payload = self._post("answerCallbackQuery", data=data)
+        result = payload.get("result")
+        if isinstance(result, dict):
+            return dict(result)
+        return {"result": result}
 
     def close(self) -> None:
         close = getattr(self.http_client, "close", None)
@@ -97,3 +130,7 @@ def probe_video_dimensions(video_path: Path) -> tuple[int, int] | None:
     if width <= 0 or height <= 0:
         return None
     return width, height
+
+
+def _compact_json(value: dict[str, Any]) -> str:
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
