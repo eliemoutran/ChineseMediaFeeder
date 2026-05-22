@@ -410,3 +410,26 @@ def test_due_checkpoint_late_first_start_does_not_send_immediate_reminders(monke
     assert state.checkpoint_sent("start", "2026-05-22") is True
     assert state.checkpoint_sent("nudge", "2026-05-22") is True
     assert state.checkpoint_sent("reminder", "2026-05-22") is True
+
+
+def test_due_checkpoint_dry_run_does_not_persist_state(monkeypatch, tmp_path):
+    configure_media_env(monkeypatch, tmp_path)
+    output = tmp_path / "output"
+    make_output(output, "peppa-001", ".mode1-nosubs.mp4")
+    settings = Settings.from_env(load_dotenv_file=False)
+    state_path = tmp_path / "bot-state.json"
+    state = BotStateStore(state_path)
+    telegram = DryRunTelegramClient()
+    sender = InteractiveDailySender(output_dir=output, state=state, telegram=telegram, chat_id="123")
+
+    class FixedDateTime:
+        @staticmethod
+        def now(tz=None):
+            return datetime(2026, 5, 22, 14, 30, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(cli_module, "datetime", FixedDateTime)
+
+    cli_module._process_due_checkpoints(settings, sender, dry_run=True)
+
+    assert [action["type"] for action in telegram.actions] == ["message", "video"]
+    assert not state_path.exists()

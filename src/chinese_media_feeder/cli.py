@@ -166,7 +166,7 @@ def run_bot(
     client = sender.telegram if not dry_run else None
     update_offset: int | None = None
     while True:
-        _process_due_checkpoints(settings, sender)
+        _process_due_checkpoints(settings, sender, dry_run=dry_run)
         if client is not None and hasattr(client, "get_updates"):
             updates = client.get_updates(offset=update_offset, timeout=20)
             for update in updates:
@@ -300,7 +300,9 @@ def _effective_schedule_config(settings: Settings, state: BotStateStore) -> BotS
     )
 
 
-def _process_due_checkpoints(settings: Settings, sender: InteractiveDailySender) -> None:
+def _process_due_checkpoints(settings: Settings, sender: InteractiveDailySender, dry_run: bool = False) -> None:
+    original_state_exists = sender.state.path.exists()
+    original_state = sender.state.load()
     config = _effective_schedule_config(settings, sender.state)
     due = due_checkpoints(
         now=datetime.now(timezone.utc),
@@ -326,6 +328,11 @@ def _process_due_checkpoints(settings: Settings, sender: InteractiveDailySender)
             typer.echo(f"Sent {checkpoint.kind} for day {result.day}: {len(result.message_ids)} messages")
         else:
             typer.echo(f"Skipped {checkpoint.kind}: {result.skipped_reason}")
+    if dry_run:
+        if original_state_exists:
+            sender.state.save(original_state)
+        elif sender.state.path.exists():
+            sender.state.path.unlink()
 
 
 def _process_update(sender: InteractiveDailySender, update: dict, expected_chat_id: str) -> None:
