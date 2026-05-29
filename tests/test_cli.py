@@ -433,3 +433,29 @@ def test_due_checkpoint_dry_run_does_not_persist_state(monkeypatch, tmp_path):
 
     assert [action["type"] for action in telegram.actions] == ["message", "video"]
     assert not state_path.exists()
+
+
+def test_due_checkpoint_missing_outputs_do_not_crash_bot_loop(monkeypatch, tmp_path, capsys):
+    configure_media_env(monkeypatch, tmp_path)
+    settings = Settings.from_env(load_dotenv_file=False)
+    state = BotStateStore(tmp_path / "bot-state.json")
+    telegram = DryRunTelegramClient()
+    sender = InteractiveDailySender(
+        output_dir=tmp_path / "missing-output",
+        state=state,
+        telegram=telegram,
+        chat_id="123",
+    )
+
+    class FixedDateTime:
+        @staticmethod
+        def now(tz=None):
+            return datetime(2026, 5, 22, 14, 30, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(cli_module, "datetime", FixedDateTime)
+
+    cli_module._process_due_checkpoints(settings, sender)
+
+    assert "Skipped start: Missing scheduled outputs: episode 1 mode 1" in capsys.readouterr().out
+    assert telegram.actions == []
+    assert state.current_session() is None

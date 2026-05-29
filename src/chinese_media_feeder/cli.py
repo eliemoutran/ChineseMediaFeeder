@@ -317,11 +317,23 @@ def _process_due_checkpoints(settings: Settings, sender: InteractiveDailySender,
             typer.echo(f"Skipped {checkpoint.kind}: late first start")
             continue
         if checkpoint.kind == "start":
-            result = sender.start_or_resume_day(local_date=checkpoint.local_date)
+            try:
+                result = sender.start_or_resume_day(local_date=checkpoint.local_date)
+            except MissingScheduleOutputError as exc:
+                typer.echo(f"Skipped {checkpoint.kind}: {exc}")
+                continue
         elif checkpoint.kind == "nudge":
-            result = sender.send_nudge(local_date=checkpoint.local_date)
+            try:
+                result = sender.send_nudge(local_date=checkpoint.local_date)
+            except MissingScheduleOutputError as exc:
+                typer.echo(f"Skipped {checkpoint.kind}: {exc}")
+                continue
         else:
-            result = sender.send_reminder(local_date=checkpoint.local_date)
+            try:
+                result = sender.send_reminder(local_date=checkpoint.local_date)
+            except MissingScheduleOutputError as exc:
+                typer.echo(f"Skipped {checkpoint.kind}: {exc}")
+                continue
         if not result.sent and result.skipped_reason in {"no active session", "day already complete"}:
             sender.state.record_checkpoint(checkpoint.kind, checkpoint.local_date)
         if result.sent:
